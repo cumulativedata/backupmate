@@ -5,6 +5,7 @@ from typing import Union
 from . import s3
 from . import mariadb
 from . import utils
+from . import config as config_module
 
 logger = logging.getLogger(__name__)
 
@@ -122,8 +123,13 @@ def stop_mariadb_server():
         bool: True on success, False on failure
     """
     try:
-        # Using systemctl for Linux systems
-        subprocess.run(['systemctl', 'stop', 'mariadb'], check=True, capture_output=True)
+        config = config_module.load_config()
+        if config.get('MYSQL_STOP_COMMAND'):
+            # Use configured command
+            subprocess.run(config['MYSQL_STOP_COMMAND'], shell=True, check=True)
+        else:
+            # Default to systemctl
+            subprocess.run(['systemctl', 'stop', 'mariadb'], check=True, capture_output=True )
         logger.info("MariaDB server stopped successfully")
         return True
     except subprocess.CalledProcessError as e:
@@ -145,8 +151,13 @@ def start_mariadb_server():
         bool: True on success, False on failure
     """
     try:
-        # Using systemctl for Linux systems
-        subprocess.run(['systemctl', 'start', 'mariadb'], check=True, capture_output=True)
+        config = config_module.load_config()
+        if config.get('MYSQL_START_COMMAND'):
+            # Use configured command
+            subprocess.run(config['MYSQL_START_COMMAND'], shell=True, check=True)
+        else:
+            # Default to systemctl
+            subprocess.run(['systemctl', 'start', 'mariadb'], check=True, capture_output=True)
         logger.info("MariaDB server started successfully")
         return True
     except subprocess.CalledProcessError as e:

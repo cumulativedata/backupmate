@@ -35,7 +35,9 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
             'DB_USER': 'root',
             'DB_PASSWORD': '',
             'LOCAL_TEMP_DIR': '/tmp/backupmate_test_backup',  # Separate backup directory
-            'IS_INTEGRATION_TEST': True  # Flag to enable test instance verification
+            'IS_INTEGRATION_TEST': True,  # Flag to enable test instance verification
+            'MYSQL_START_COMMAND': f'mariadbd --datadir={cls.TEST_DATADIR} --port={cls.TEST_PORT} --socket={cls.TEST_DATADIR}.sock --pid-file={cls.TEST_DATADIR}.pid --log-error={cls.TEST_DATADIR}.log --skip-networking=0 --user=mysql --basedir=/usr --tmpdir={cls.TEST_DATADIR}_tmp --innodb_data_home_dir={cls.TEST_DATADIR}_innodb --innodb_log_group_home_dir={cls.TEST_DATADIR}_innodb --binlog-format=ROW --expire-logs-days=10 --open-files-limit=65535 --innodb_data_file_path=ibdata1:10M:autoextend --innodb_file_per_table=1 --lower_case_table_names=0 --log-warnings=2 &',
+            'MYSQL_STOP_COMMAND': f'kill -9 $(cat {cls.TEST_DATADIR}.pid)'
         }
         # Load config from .backupmate.env and modify for test instance
         cls.config = config.load_config()
@@ -50,8 +52,9 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         """Clean up test environment."""
-        cls.stop_test_mariadb_instance()
+        #cls.stop_test_mariadb_instance()
         #cls.cleanup_test_files() # Keeping this off for testing
+        pass
 
     def setUp(self):
         """Set up test case."""
@@ -143,6 +146,35 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
             except Exception as e:
                 cls.logger.warning(f"Failed to remove {file}: {e}")
         os.system('ls -la /tmp/')
+    
+    @classmethod
+    def verify_data_directory(cls):
+        essential_files = [
+            'mysql',
+            'ibdata1',
+            'ib_logfile0',
+            'ib_logfile1',
+            'aria_log.00000001',
+            'aria_log_control',
+            'aria_page.00000001',
+            'aria_page_control'
+        ]
+        for file in essential_files:
+            file_path = os.path.join(cls.TEST_DATADIR, file)
+            cls.assertTrue(
+                os.path.exists(file_path),
+                f"Essential file or directory missing: {file_path}"
+            )
+            cls.logger.info(f"Verified existence of: {file_path}")
+    
+    @classmethod
+    def list_data_directory_contents(cls):
+        cls.logger.info(f"Listing contents of {cls.TEST_DATADIR}:")
+        for root, dirs, files in os.walk(cls.TEST_DATADIR):
+            for name in dirs:
+                cls.logger.info(f"DIR: {os.path.join(root, name)}")
+            for name in files:
+                cls.logger.info(f"FILE: {os.path.join(root, name)}")
 
     @classmethod
     def setup_test_mariadb_instance(cls):
@@ -194,6 +226,8 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
         init_cmd = [
             'mariadb-install-db',
             f'--datadir={cls.TEST_DATADIR}',
+            f'--innodb-data-home-dir={cls.TEST_DATADIR}_innodb',
+            f'--innodb-log-group-home-dir={cls.TEST_DATADIR}_innodb',
             '--user=mysql',
             '--skip-test-db',
             '--auth-root-authentication-method=normal'
@@ -207,27 +241,35 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
             cls.logger.error(f"Command output: {e.stdout}")
             cls.logger.error(f"Command error: {e.stderr}")
             raise
+
+        # Verify essential files
+        cls.verify_data_directory()
+        cls.list_data_directory_contents()
             
         # Ensure mysql user has full permissions on data directory using helper method
-        cls.set_directory_permissions([cls.TEST_DATADIR], user='mysql', group='mysql', mode=0o750)
-        cls.verify_permissions([cls.TEST_DATADIR], expected_user='mysql', expected_group='mysql', expected_mode=0o750)
+        cls.set_directory_permissions([cls.TEST_DATADIR,f'{cls.TEST_DATADIR}_innodb'], user='mysql', group='mysql', mode=0o750)
+        cls.verify_permissions([cls.TEST_DATADIR,f'{cls.TEST_DATADIR}_innodb'], expected_user='mysql', expected_group='mysql', expected_mode=0o750)
         
-        # Start MariaDB server with additional permissions
-        server_cmd = [
-            'mariadbd',
-            '--user=mysql',  # Explicitly run as mysql user
-            '--basedir=/usr',  # Specify base directory
-            f'--datadir={cls.TEST_DATADIR}',
-            f'--port={cls.TEST_PORT}',
-            f'--socket={cls.TEST_DATADIR}.sock',
-            f'--pid-file={cls.TEST_DATADIR}.pid',
-            f'--log-error={cls.TEST_DATADIR}.log',
-            f'--tmpdir={cls.TEST_DATADIR}_tmp',
-            f'--innodb_data_home_dir={cls.TEST_DATADIR}_innodb',
-            f'--innodb_log_group_home_dir={cls.TEST_DATADIR}_innodb',
-        ]
+        # Create and set permissions for log file
+        log_file = f'{cls.TEST_DATADIR}.log'
+        try:
+            # Create empty log file if it doesn't exist
+            open(log_file, 'a').close()
+            # Set ownership and permissions
+            subprocess.run(['chown', 'mysql:mysql', log_file], check=True)
+            subprocess.run(['chmod', '640', log_file], check=True)
+            cls.logger.info(f"Created and set permissions for log file: {log_file}")
+        except Exception as e:
+            cls.logger.error(f"Failed to setup log file: {e}")
+            raise
 
-        cls.mariadb_process = subprocess.Popen(server_cmd)
+        # Start MariaDB server in background
+        try:
+            subprocess.run(config.integration_overrides['MYSQL_START_COMMAND'], shell=True, check=True)
+            cls.logger.info("Started MariaDB server process in background")
+        except subprocess.CalledProcessError as e:
+            cls.logger.error(f"Failed to start MariaDB server: {e}")
+            raise
         
         # Wait for server to start
         max_retries = 30
@@ -280,9 +322,10 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
     @classmethod
     def stop_test_mariadb_instance(cls):
         """Stop the test MariaDB instance."""
-        if hasattr(cls, 'mariadb_process'):
-            cls.mariadb_process.terminate()
-            cls.mariadb_process.wait()
+        try:
+            subprocess.run(config.integration_overrides['MYSQL_STOP_COMMAND'], shell=True, check=True)
+        except Exception as e:
+            cls.logger.warning(f"Failed to stop MariaDB instance: {e}")
 
     def create_test_data(self):
         """Create test database and sample data."""
@@ -355,6 +398,7 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
         """Test backup and restore cycle using specific backup ID."""
                 # Start test MariaDB instance
         self.setup_test_mariadb_instance()
+        self.logger.info("Done with setup_test-mariadb_isntances")
 
         # Create unique timestamp for this test run
         self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -394,22 +438,17 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
             shutil.rmtree(backup_folder)
             self.logger.info(f"Cleaned up backup folder: {backup_folder}")
         
-        # Stop MariaDB server before restore
-        self.logger.info("Stopping MariaDB server before restore...")
-        if hasattr(self.__class__, 'mariadb_process'):
-            self.__class__.mariadb_process.terminate()
-            self.__class__.mariadb_process.wait()
-            self.logger.info("MariaDB server stopped")
+        # We don't Stop MariaDB server before restore because restore.py should do that
 
         # Drop test database to simulate data loss
-        self.cleanup_test_files()
+        self.cleanup_test_data()
         
         # Step 3: Prepare directories with fully permissive permissions for restore
         try:
             # Create directories if they don't exist
             dirs = [
                 self.TEST_EXTRACTDIR,
-                f'{self.TEST_DATADIR}_tmp'
+                # f'{self.TEST_DATADIR}_tmp'
             ]
             for dir_path in dirs:
                 os.makedirs(dir_path, exist_ok=True)
@@ -435,51 +474,9 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
         os.environ.pop('IS_INTEGRATION_TEST', None)
         self.assertEqual(result, 0, "Restore command failed")
 
-        # Fix permissions again after restore, in case any files were created with different permissions
-        try:
-            restored_dirs = [
-                self.TEST_DATADIR,
-                f'{self.TEST_DATADIR}_innodb',
-                f'{self.TEST_DATADIR}'
-            ]
-            os.system("chown -R mysql:mysql "+ ' '.join(restored_dirs))
-            cls.verify_permissions(restored_dirs, expected_user='mysql', expected_group='mysql', expected_mode=0o700)
-            
-            self.logger.info("Fixed ownership and permissions after restore")
-        except Exception as e:
-            self.logger.error(f"Failed to fix permissions after restore: {e}")
-            raise
-            
+        # Verify server is running after restore
+        self.logger.info("Verifying server is running after restore...")
         
-        # Start MariaDB server after restore
-        self.logger.info("Starting MariaDB server after restore...")
-        server_cmd = [
-            'mariadbd',
-            f'--datadir={self.TEST_DATADIR}',
-            f'--port={self.TEST_PORT}',
-            f'--socket={self.TEST_DATADIR}.sock',
-            f'--pid-file={self.TEST_DATADIR}.pid',
-            f'--log-error={self.TEST_DATADIR}.log',
-            '--skip-networking=0',
-            '--user=mysql',
-            '--basedir=/usr',
-            f'--tmpdir={self.TEST_DATADIR}_tmp',
-            f'--innodb_data_home_dir={self.TEST_DATADIR}_innodb',
-            f'--innodb_log_group_home_dir={self.TEST_DATADIR}_innodb',
-            # f'--log-bin={self.TEST_DATADIR}_tmp/mysql-bin',
-            '--binlog-format=ROW',
-            '--expire-logs-days=10',
-            # f'--log-bin-index={self.TEST_DATADIR}_tmp/mysql-bin.index',
-            '--open-files-limit=65535',
-            '--innodb_data_file_path=ibdata1:10M:autoextend',
-            '--innodb_file_per_table=1',
-            '--lower_case_table_names=0',
-            '--log-warnings=2'
-        ]
-
-        self.__class__.mariadb_process = subprocess.Popen(server_cmd)
-        
-        # Wait for server to start
         max_retries = 5
         retry_interval = 1
         server_started = False

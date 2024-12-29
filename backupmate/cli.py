@@ -54,18 +54,20 @@ def handle_restore(args: argparse.Namespace, config: Dict[str, Any], logger: Any
         backup_identifier = args.backup_id
         if args.latest_full:
             # TODO: Get latest full backup identifier from S3
-            backup_identifier = list_objects(
+            backups = list_objects(
                 config['S3_BUCKET_NAME'],
                 config['FULL_BACKUP_PREFIX'],
                 config
-            )[-1] if list_objects(config['S3_BUCKET_NAME'], config['FULL_BACKUP_PREFIX'], config) else None
+            )
+            backup_identifier = backups[-1] if backups else None
         elif args.latest_incremental:
             # TODO: Get latest incremental backup identifier from S3
-            backup_identifier = list_objects(
+            backups = list_objects(
                 config['S3_BUCKET_NAME'],
                 config['INCREMENTAL_BACKUP_PREFIX'],
                 config
-            )[-1] if list_objects(config['S3_BUCKET_NAME'], config['INCREMENTAL_BACKUP_PREFIX'], config) else None
+            )
+            backup_identifier = backups[-1] if backups else None
 
         if not backup_identifier:
             log_error(logger, "No backup found to restore")
@@ -151,9 +153,14 @@ def main() -> Optional[int]:
 
     try:
         # Check if running as root/sudo for backup and restore commands
-        if args.command in ["backup", "restore"] and os.geteuid() != 0:
-            print("Error: backup and restore commands must be run with sudo", file=sys.stderr)
-            return 1
+        if args.command in ["backup", "restore"]:
+            try:
+                if os.name == 'posix' and os.geteuid() != 0:
+                    print("Error: backup and restore commands must be run with sudo", file=sys.stderr)
+                    return 1
+            except AttributeError:
+                # Windows doesn't have geteuid, skip the check
+                pass
 
         # Load and validate configuration
         config = load_config()

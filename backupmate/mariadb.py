@@ -317,6 +317,21 @@ def restore_backup(backup_dir, config, method='copy-back'):
     try:
         # Restore the backup
         subprocess.run(command, check=True, capture_output=False)
+        
+        # Fix ownership after restore
+        restored_dirs = [
+            datadir,
+            innodb_data_dir,
+            innodb_log_dir
+        ]
+        try:
+            # Set ownership to mysql:mysql
+            subprocess.run(['chown', '-R', 'mysql:mysql'] + restored_dirs, check=True)
+            logger.info("Fixed ownership after restore")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to fix ownership after restore: {e}")
+            return False
+            
         return True
     except subprocess.CalledProcessError as e:
         logger.error(f"Restoring backup from {backup_dir} failed: {e}")

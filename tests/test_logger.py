@@ -106,41 +106,55 @@ class TestLogger(unittest.TestCase):
         
     def test_log_info(self):
         """Test info level logging."""
-        with self.assertLogs(level='INFO') as log_context:
-            logger = setup_logger("test_info")
-            self.loggers.append(logger)
-            test_data = {"status": "success"}
-            
-            log_info(logger, "Test info message", test_data)
-            
-            # Verify log output
-            self.assertEqual(len(log_context.records), 1)
-            record = log_context.records[0]
-            self.assertEqual(record.levelname, 'INFO')
-            self.assertEqual(record.message, 'Test info message')
-            self.assertTrue(hasattr(record, 'data'))
-            self.assertEqual(record.data, test_data)
+        from io import StringIO
+        log_output = StringIO()
+        logger = setup_logger("test_info")
+        self.loggers.append(logger)
+        
+        # Replace the StreamHandler with our StringIO handler
+        logger.handlers = []
+        handler = logging.StreamHandler(log_output)
+        handler.setFormatter(JsonFormatter())
+        logger.addHandler(handler)
+        
+        test_data = {"status": "success"}
+        log_info(logger, "Test info message", test_data)
+        
+        # Get the log output and parse it
+        log_content = log_output.getvalue()
+        log_data = json.loads(log_content)
+        
+        self.assertEqual(log_data["level"], "INFO")
+        self.assertEqual(log_data["message"], "Test info message")
+        self.assertEqual(log_data["data"], test_data)
         
     def test_log_error(self):
         """Test error level logging."""
-        with self.assertLogs(level='ERROR') as log_context:
-            logger = setup_logger("test_error")
-            self.loggers.append(logger)
-            test_data = {"status": "failed"}
-            
-            try:
-                raise ValueError("Test error")
-            except ValueError:
-                log_error(logger, "Test error message", test_data)
-            
-            # Verify log output
-            self.assertEqual(len(log_context.records), 1)
-            record = log_context.records[0]
-            self.assertEqual(record.levelname, 'ERROR')
-            self.assertEqual(record.message, 'Test error message')
-            self.assertTrue(hasattr(record, 'data'))
-            self.assertEqual(record.data, test_data)
-            self.assertIn('ValueError: Test error', record.exc_text)
+        from io import StringIO
+        log_output = StringIO()
+        logger = setup_logger("test_error")
+        self.loggers.append(logger)
+        
+        # Replace the StreamHandler with our StringIO handler
+        logger.handlers = []
+        handler = logging.StreamHandler(log_output)
+        handler.setFormatter(JsonFormatter())
+        logger.addHandler(handler)
+        
+        test_data = {"status": "failed"}
+        try:
+            raise ValueError("Test error")
+        except ValueError:
+            log_error(logger, "Test error message", test_data)
+        
+        # Get the log output and parse it
+        log_content = log_output.getvalue()
+        log_data = json.loads(log_content)
+        
+        self.assertEqual(log_data["level"], "ERROR")
+        self.assertEqual(log_data["message"], "Test error message")
+        self.assertEqual(log_data["data"], test_data)
+        self.assertIn("ValueError: Test error", log_data["exception"])
         
     def test_log_to_file(self):
         """Test that logs are correctly written to file."""

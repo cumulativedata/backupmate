@@ -14,7 +14,7 @@ def load_config(env_path=".backupmate.env"):
             "FULL_BACKUP_SCHEDULE",
             "MARIADB_DATADIR", "IS_INTEGRATION_TEST"  # Optional parameters
         ]}
-    assert 'integration_overrides' in globals()
+    #assert 'integration_overrides' in globals()
 
     # Load with override to ensure we get values from the specified file
     load_dotenv(dotenv_path=env_path, override=True)
@@ -35,6 +35,8 @@ def load_config(env_path=".backupmate.env"):
         "MARIADB_SOCKET": os.getenv("MARIADB_SOCKET"),  # Socket file path (required)
         "MARIADB_DATADIR": os.getenv("MARIADB_DATADIR"),  # Optional data directory path
         "IS_INTEGRATION_TEST": os.getenv("IS_INTEGRATION_TEST", "false").lower() == "true",  # Integration test flag
+        "MYSQL_START_COMMAND": os.getenv("MYSQL_START_COMMAND"),  # Optional command to start MySQL server
+        "MYSQL_STOP_COMMAND": os.getenv("MYSQL_STOP_COMMAND"),  # Optional command to stop MySQL server
     }
     if 'integration_overrides' in globals():
         config.update(integration_overrides)
@@ -56,7 +58,6 @@ def validate_config(config):
         "FULL_BACKUP_PREFIX",
         "INCREMENTAL_BACKUP_PREFIX",
         "FULL_BACKUP_SCHEDULE",
-        "MARIADB_SOCKET",
     ]
     for param in required_params:
         if param != 'DB_PASSWORD' and (not config.get(param) or config[param].strip() == ""):
@@ -86,7 +87,7 @@ def validate_config(config):
         raise ValueError("LOCAL_TEMP_DIR must be an absolute path")
     
     # Validate socket path
-    if not os.path.isabs(config["MARIADB_SOCKET"]):
+    if config.get("MARIADB_SOCKET") and not os.path.isabs(config["MARIADB_SOCKET"]):
         raise ValueError("MARIADB_SOCKET must be an absolute path")
     if config.get("MARIADB_DATADIR") and not os.path.isabs(config["MARIADB_DATADIR"]):
         raise ValueError("MARIADB_DATADIR must be an absolute path")

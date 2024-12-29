@@ -1,8 +1,12 @@
 import unittest
 from unittest.mock import patch, MagicMock, mock_open
 import os
+import logging
 from datetime import datetime
 from backupmate import backup
+
+# Configure logging for tests
+logging.basicConfig(level=logging.DEBUG)
 
 class TestBackup(unittest.TestCase):
     def setUp(self):
@@ -24,7 +28,7 @@ class TestBackup(unittest.TestCase):
     @patch('backupmate.backup.mariadb.take_full_backup')
     @patch('backupmate.backup.mariadb.prepare_backup')
     @patch('backupmate.backup.utils.compress_directory')
-    @patch('backupmate.backup.s3.upload_directory')
+    @patch('backupmate.backup.s3.upload_file')
     @patch('backupmate.backup.record_backup_metadata')
     def test_perform_full_backup_success(self, mock_record, mock_upload, mock_compress, 
                                        mock_prepare, mock_take_backup, mock_exists, 
@@ -113,7 +117,7 @@ class TestBackup(unittest.TestCase):
     @patch('backupmate.backup.os.path.exists')
     @patch('backupmate.backup.mariadb.take_incremental_backup')
     @patch('backupmate.backup.utils.compress_directory')
-    @patch('backupmate.backup.s3.upload_directory')
+    @patch('backupmate.backup.s3.upload_file')
     @patch('backupmate.backup.s3.download_directory')
     @patch('backupmate.backup.record_backup_metadata')
     def test_perform_incremental_backup_success(self, mock_record, mock_download, 
@@ -194,14 +198,25 @@ class TestBackup(unittest.TestCase):
                                                   mock_exists, mock_makedirs):
         """Tests that incremental backup cleanup continues even if some operations fail."""
         base_prefix = 'backups/full/20230101_000000'
-        mock_exists.return_value = True
-        mock_download.return_value = False
-        mock_rmtree.side_effect = OSError("Failed to remove directory")
+        # Print mock calls for debugging
+        def exists_side_effect(path):
+            print(f"exists called with: {path}")
+            return True
+        mock_exists.side_effect = exists_side_effect
+        
+        def rmtree_side_effect(path):
+            print(f"rmtree called with: {path}")
+            raise OSError("Failed to remove directory")
+        mock_rmtree.side_effect = rmtree_side_effect
+        
+        mock_download.side_effect = Exception("Download failed")
         
         result = backup.perform_incremental_backup(self.config, base_prefix)
         
         self.assertFalse(result)
         mock_download.assert_called_once()
+        # Verify both directories were created
+        self.assertEqual(mock_makedirs.call_count, 2)
         # Should try to remove both directories even if first one fails
         self.assertEqual(mock_rmtree.call_count, 2)
         

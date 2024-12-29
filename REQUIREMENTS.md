@@ -35,6 +35,10 @@ INCREMENTAL_BACKUP_PREFIX: Prefix for incremental backups in S3 (e.g., backupmat
 
 FULL_BACKUP_SCHEDULE: Backup schedule for full backups (e.g., weekly, monthly).
 
+MYSQL_START_COMMAND: (Optional) Command to start MySQL server. If not provided, defaults to using systemctl.
+
+MYSQL_STOP_COMMAND: (Optional) Command to stop MySQL server. If not provided, defaults to using systemctl.
+
 Automated Backups (Cron):
 
 The script should be executable via cron.
@@ -179,7 +183,7 @@ take_incremental_backup(target_dir, basedir, config): Executes an incremental Ma
 
 prepare_backup(target_dir, incremental_dirs=None, config): Prepares the backup by applying logs. Returns True on success, False on failure.
 
-restore_backup(backup_dir, config, method='copy-back'): Restores the backup to the MariaDB data directory. Returns True on success, False on failure.
+restore_backup(backup_dir, config, method='copy-back'): Restores the backup to the MariaDB data directory and sets mysql:mysql ownership on restored files. Returns True on success, False on failure.
 
 3. backupmate/s3.py
 
@@ -217,9 +221,13 @@ restore_specific_backup(backup_identifier, restore_method, config): Orchestrates
 
 download_and_prepare_backup(backup_prefix, local_staging_dir, config): Downloads the necessary backup files from S3 and prepares them for restoration. Returns True on success, False on failure.
 
-stop_mariadb_server(): Stops the MariaDB server (implementation depends on OS).
+stop_mariadb_server(): Stops the MariaDB server using MYSQL_STOP_COMMAND from config if provided, otherwise uses systemctl.
 
-start_mariadb_server(): Starts the MariaDB server (implementation depends on OS).
+start_mariadb_server(): Starts the MariaDB server using MYSQL_START_COMMAND from config if provided, otherwise uses systemctl.
+
+Function Dependencies:
+- restore_specific_backup calls stop_mariadb_server before restore and start_mariadb_server after restore
+- restore_specific_backup calls mariadb.restore_backup which handles setting mysql:mysql ownership on restored files
 
 6. backupmate/logger.py
 

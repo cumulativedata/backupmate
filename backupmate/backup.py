@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import logging
+import shutil
 from datetime import datetime
 from . import mariadb
 from . import s3
@@ -84,16 +85,25 @@ def perform_full_backup(config):
         return False
     finally:
         # Cleanup
-        try:
-            # Use shutil.rmtree for backup_dir since it may not be empty
-            if os.path.exists(backup_dir):
-                import shutil
+        logger.debug("Starting cleanup...")
+        
+        # Clean up backup directory
+        logger.debug(f"Checking backup_dir existence: {backup_dir} - {os.path.exists(backup_dir)}")
+        if os.path.exists(backup_dir):
+            try:
+                logger.debug(f"Removing backup directory: {backup_dir}")
                 shutil.rmtree(backup_dir)
-            if os.path.exists(compressed_file):
+            except OSError as e:
+                logger.warning(f"Failed to remove backup directory: {str(e)}")
+        
+        # Clean up compressed file
+        logger.debug(f"Checking compressed file existence: {compressed_file} - {os.path.exists(compressed_file)}")
+        if os.path.exists(compressed_file):
+            try:
+                logger.debug(f"Removing compressed file: {compressed_file}")
                 os.remove(compressed_file)
-        except OSError as e:
-            logger.warning(f"Cleanup failed: {str(e)}")
-            # Continue even if cleanup fails - it's not critical
+            except OSError as e:
+                logger.warning(f"Failed to remove compressed file: {str(e)}")
 
 def perform_incremental_backup(config, base_prefix):
     """
@@ -114,17 +124,23 @@ def perform_incremental_backup(config, base_prefix):
     
     try:
         # Create backup directories
+        logger.debug(f"Creating backup directory: {backup_dir}")
         os.makedirs(backup_dir, exist_ok=True)
+        logger.debug(f"Creating base directory: {base_dir}")
         os.makedirs(base_dir, exist_ok=True)
         
-        # Download base backup
-        if not s3.download_directory(
-            config.get('S3_BUCKET_NAME'),
-            base_prefix,
-            base_dir,
-            config
-        ):
-            logger.error("Failed to download base backup")
+        try:
+            # Download base backup
+            if not s3.download_directory(
+                config.get('S3_BUCKET_NAME'),
+                base_prefix,
+                base_dir,
+                config
+            ):
+                logger.error("Failed to download base backup")
+                return False
+        except Exception as e:
+            logger.error(f"Failed to download base backup: {str(e)}")
             return False
             
         # Take incremental backup
@@ -158,18 +174,34 @@ def perform_incremental_backup(config, base_prefix):
         return False
     finally:
         # Cleanup
-        try:
-            # Use shutil.rmtree for directories since they may not be empty
-            if os.path.exists(backup_dir):
-                import shutil
+        logger.debug("Starting cleanup...")
+        
+        # Clean up backup directory
+        logger.debug(f"Checking backup_dir existence: {backup_dir} - {os.path.exists(backup_dir)}")
+        if os.path.exists(backup_dir):
+            try:
+                logger.debug(f"Removing backup directory: {backup_dir}")
                 shutil.rmtree(backup_dir)
-            if os.path.exists(base_dir):
+            except OSError as e:
+                logger.warning(f"Failed to remove backup directory: {str(e)}")
+        
+        # Clean up base directory
+        logger.debug(f"Checking base_dir existence: {base_dir} - {os.path.exists(base_dir)}")
+        if os.path.exists(base_dir):
+            try:
+                logger.debug(f"Removing base directory: {base_dir}")
                 shutil.rmtree(base_dir)
-            if os.path.exists(compressed_file):
+            except OSError as e:
+                logger.warning(f"Failed to remove base directory: {str(e)}")
+        
+        # Clean up compressed file
+        logger.debug(f"Checking compressed file existence: {compressed_file} - {os.path.exists(compressed_file)}")
+        if os.path.exists(compressed_file):
+            try:
+                logger.debug(f"Removing compressed file: {compressed_file}")
                 os.remove(compressed_file)
-        except OSError as e:
-            logger.warning(f"Cleanup failed: {str(e)}")
-            # Continue even if cleanup fails - it's not critical
+            except OSError as e:
+                logger.warning(f"Failed to remove compressed file: {str(e)}")
 
 def get_latest_full_backup_prefix(s3_bucket, full_backup_prefix, config):
     """

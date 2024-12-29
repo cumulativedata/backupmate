@@ -50,12 +50,14 @@ class TestUtils(unittest.TestCase):
     def test_decompress_archive_success(self, mock_mkdir, mock_tarfile, mock_is_file):
         mock_is_file.return_value = True
         mock_tar = MagicMock()
-        mock_tar.getmembers.return_value = [MagicMock(name='safe/path')]
+        mock_member = MagicMock()
+        mock_member.name = 'safe/path'
+        mock_tar.getmembers.return_value = [mock_member]
         mock_tarfile.return_value.__enter__.return_value = mock_tar
         
         result = decompress_archive(self.test_archive, self.output_dir)
         
-        self.assertTrue(result)
+        self.assertEqual(result, os.path.join(self.output_dir, 'test_archive'))
         mock_mkdir.assert_called_once()
         mock_tar.extractall.assert_called_once()
 
@@ -101,13 +103,16 @@ class TestUtils(unittest.TestCase):
     @patch('shutil.rmtree')
     def test_clean_directory_success(self, mock_rmtree, mock_unlink, mock_iterdir, mock_is_dir):
         mock_is_dir.return_value = True
-        file_mock = MagicMock()
-        file_mock.is_file.return_value = True
-        file_mock.is_dir.return_value = False
-        dir_mock = MagicMock()
-        dir_mock.is_file.return_value = False
-        dir_mock.is_dir.return_value = True
-        mock_iterdir.return_value = [file_mock, dir_mock]
+        mock_file = MagicMock()
+        mock_file.is_file.return_value = True
+        mock_file.is_dir.return_value = False
+        mock_file.unlink = mock_unlink
+        
+        mock_dir = MagicMock()
+        mock_dir.is_file.return_value = False
+        mock_dir.is_dir.return_value = True
+        
+        mock_iterdir.return_value = [mock_file, mock_dir]
         
         result = clean_directory(self.test_dir)
         
