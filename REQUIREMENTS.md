@@ -99,15 +99,8 @@ The project uses Python's unittest framework for testing. Tests are organized to
 
 Test Organization:
 - Each test file corresponds to a specific module (e.g., test_config.py tests config.py)
-- Test classes inherit from unittest.TestCase
 - Test methods follow the pattern test_functionname_scenario()
 - Tests are organized in order of happy path, edge cases, then error cases
-
-Test Dependencies:
-- unittest: Python's built-in testing framework
-- unittest.mock: For mocking external dependencies
-- Proper use of setUp() for test initialization
-- Consistent mocking patterns for external services (S3, MariaDB)
 
 Mocking Patterns:
 1. External Services:
@@ -132,32 +125,8 @@ Test Execution:
 
 2. Running specific test file:
    ```bash
-   python -m unittest tests/test_specific.py
+   python -m unittest tests.test_specific
    ```
-
-3. Running specific test case:
-   ```bash
-   python -m unittest tests.test_specific.TestClass.test_method
-   ```
-
-4. Running with verbosity:
-   ```bash
-   python -m unittest -v tests/test_specific.py
-   ```
-
-Test Coverage:
-- Each function should have tests for:
-  * Success scenarios (happy path)
-  * Edge cases (empty inputs, boundary conditions)
-  * Error handling (expected exceptions)
-  * Resource cleanup (where applicable)
-
-Test Validation:
-- All tests must pass before merging changes
-- Test names should be descriptive of what they're testing
-- Each test should focus on a single aspect of functionality
-- Use appropriate assertions for different types of checks
-- Include docstrings explaining test scenarios
 
 Project Folder Structure:
 
