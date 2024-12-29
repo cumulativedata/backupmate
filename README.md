@@ -19,23 +19,49 @@ pip install .
 
 ## Configuration
 
-Create a `.backupmate.env` file in the directory where you run the `backupmate` command. Example:
+Create a `.backupmate.env` file in the directory where you run the `backupmate` command.
+
+### Required Configuration
 
 ```env
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=backup_user
-DB_PASSWORD=secure_password
-MARIADB_BACKUP_PATH=/usr/bin/mariabackup
-S3_BUCKET_NAME=your-s3-bucket-name
-AWS_ACCESS_KEY_ID=YOUR_ACCESS_KEY
-AWS_SECRET_ACCESS_KEY=YOUR_SECRET_KEY
-AWS_REGION=us-east-1
-LOCAL_TEMP_DIR=/tmp/backupmate
-FULL_BACKUP_PREFIX=backupmate/full/
-INCREMENTAL_BACKUP_PREFIX=backupmate/incremental/
-FULL_BACKUP_SCHEDULE=weekly
+# Database Connection
+DB_HOST=localhost                    # Database host
+DB_PORT=3306                        # Database port (must be integer)
+DB_USER=backup_user                 # Database user with backup privileges
+DB_PASSWORD=secure_password         # Database password
+MARIADB_SOCKET=/var/run/mysqld/mysqld.sock  # MariaDB socket file path
+
+# Backup Tool
+MARIADB_BACKUP_PATH=/usr/bin/mariabackup  # Path to mariabackup executable (absolute path)
+LOCAL_TEMP_DIR=/tmp/backupmate      # Temporary directory for backups (absolute path)
+
+# AWS S3 Configuration
+S3_BUCKET_NAME=your-s3-bucket-name  # S3 bucket for storing backups
+AWS_ACCESS_KEY_ID=YOUR_ACCESS_KEY   # AWS access key
+AWS_SECRET_ACCESS_KEY=YOUR_SECRET_KEY  # AWS secret key
+AWS_REGION=us-east-1               # AWS region
+
+# Backup Strategy
+FULL_BACKUP_PREFIX=backupmate/full/  # S3 prefix for full backups (must end with /)
+INCREMENTAL_BACKUP_PREFIX=backupmate/incremental/  # S3 prefix for incremental backups (must end with /)
+FULL_BACKUP_SCHEDULE=weekly         # Schedule for full backups ('weekly' or 'monthly')
 ```
+
+### Optional Configuration
+
+```env
+# Database Server Management
+MARIADB_DATADIR=/var/lib/mysql     # Custom data directory path
+MYSQL_START_COMMAND=systemctl start mariadb  # Custom command to start MariaDB
+MYSQL_STOP_COMMAND=systemctl stop mariadb   # Custom command to stop MariaDB
+```
+
+### Configuration Validation Rules
+
+- All paths (MARIADB_BACKUP_PATH, LOCAL_TEMP_DIR, MARIADB_SOCKET, MARIADB_DATADIR) must be absolute
+- DB_PORT must be an integer
+- FULL_BACKUP_SCHEDULE must be either 'weekly' or 'monthly'
+- S3 prefix paths must end with '/'
 
 ## Usage
 
@@ -43,27 +69,65 @@ FULL_BACKUP_SCHEDULE=weekly
 backupmate --help
 ```
 
-### Backing up
+### Automated Backups
 
+BackupMate can be configured to run automated backups via cron. It automatically determines whether to perform a full or incremental backup based on the schedule and existing backups.
+
+Example cron configuration:
 ```bash
-backupmate backup
-backupmate backup --full
+# Daily incremental backup at 1 AM
+0 1 * * * sudo backupmate backup
+
+# Weekly full backup on Sundays at 2 AM
+0 2 * * 0 sudo backupmate backup --full
 ```
 
-### Restoring
+### Manual Backups
 
 ```bash
-backupmate restore <backup_id>
-backupmate restore --latest-full
-backupmate restore --latest-incremental
-backupmate restore <backup_id> --move-back
-backupmate restore --latest-full --json
+# Perform an incremental backup
+sudo backupmate backup
+
+# Force a full backup
+sudo backupmate backup --full
 ```
+
+Note: Backup commands require sudo privileges on Unix systems.
+
+### Restoring Backups
+
+```bash
+# Restore a specific backup by ID
+sudo backupmate restore <backup_id>
+
+# Restore the latest full backup
+sudo backupmate restore --latest-full
+
+# Restore the latest incremental backup
+sudo backupmate restore --latest-incremental
+
+# Restore using move-back instead of copy-back
+sudo backupmate restore <backup_id> --move-back
+
+# Get restore output in JSON format
+sudo backupmate restore --latest-full --json
+```
+
+The restore process:
+1. Downloads necessary backup files from S3
+2. Prepares the backup (applies incremental changes if needed)
+3. Optionally stops the MariaDB server
+4. Restores files using either copy-back or move-back method
+5. Sets appropriate file permissions
+6. Optionally starts the MariaDB server
 
 ### Listing Backups
 
 ```bash
+# List available backups in human-readable format
 backupmate list
+
+# List backups in JSON format
 backupmate list --json
 ```
 
@@ -71,15 +135,55 @@ backupmate list --json
 
 ### Setting up the development environment
 
+1. Create and activate a virtual environment:
 ```bash
 python -m venv venv
-source venv/bin/activate
-pip install -e .
-pip install -r requirements-dev.txt # Create a requirements-dev.txt for testing deps
+source venv/bin/activate  # On Unix
+venv\Scripts\activate     # On Windows
 ```
 
-### Running tests
+2. Install in development mode:
+```bash
+pip install -e .
+```
+
+### Running Tests
 
 ```bash
+# Run all tests
 python -m unittest discover -s tests
+
+# Run a specific test file
+python -m unittest tests.test_specific
+
+# Run integration tests
+python -m unittest tests.integration_backup_restore
+```
+
+### Error Handling and Logging
+
+BackupMate implements comprehensive error handling and logging:
+
+- All operations are logged in JSON format
+- Logs include timestamps, actions performed, and any errors
+- Failed S3 operations are automatically retried
+- Detailed error messages help diagnose issues
+- Logs are stored locally for troubleshooting
+
+### Project Structure
+
+```
+backupmate/
+├── backupmate/           # Main package
+│   ├── cli.py           # CLI interface
+│   ├── config.py        # Configuration management
+│   ├── mariadb.py       # MariaDB operations
+│   ├── s3.py            # S3 operations
+│   ├── backup.py        # Backup logic
+│   ├── restore.py       # Restore logic
+│   ├── logger.py        # JSON logging
+│   └── utils.py         # Utilities
+└── tests/               # Test suite
+    ├── test_*.py        # Unit tests
+    └── integration_*.py # Integration tests
 ```
