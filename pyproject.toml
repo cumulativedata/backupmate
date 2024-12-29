@@ -6,8 +6,6 @@ build-backend = "setuptools.build_meta"
 name = "backupmate"
 version = "0.1.0"
 dependencies = [
-    "python-dotenv",
-    "boto3",
-    "argparse",
-    "SQLAlchemy"
+    "python-dotenv>=0.19.0",
+    "boto3>=1.26.0"
 ]

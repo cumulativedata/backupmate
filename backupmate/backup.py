@@ -40,6 +40,7 @@ def perform_full_backup(config):
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     backup_dir = os.path.join(config.get('LOCAL_TEMP_DIR'), f'full_{timestamp}')
     s3_prefix = f"{config.get('FULL_BACKUP_PREFIX')}/{timestamp}"
+    compressed_file = f"{backup_dir}.tar.gz"
     
     try:
         # Create backup directory
@@ -47,16 +48,17 @@ def perform_full_backup(config):
         
         # Take full backup
         if not mariadb.take_full_backup(backup_dir, config):
-            logger.error("Full backup failed")
+            logger.error("Full backup failed - mariadb-backup command failed")
+            # Don't attempt further steps if backup fails
             return False
             
         # Prepare the backup
         if not mariadb.prepare_backup(backup_dir, config=config):
-            logger.error("Backup preparation failed")
+            logger.error("Backup preparation failed - mariadb-backup prepare command failed")
+            # Don't attempt further steps if preparation fails
             return False
             
         # Compress the backup
-        compressed_file = f"{backup_dir}.tar.gz"
         if not utils.compress_directory(backup_dir, compressed_file):
             logger.error("Backup compression failed")
             return False
@@ -83,12 +85,15 @@ def perform_full_backup(config):
     finally:
         # Cleanup
         try:
+            # Use shutil.rmtree for backup_dir since it may not be empty
             if os.path.exists(backup_dir):
-                os.rmdir(backup_dir)
+                import shutil
+                shutil.rmtree(backup_dir)
             if os.path.exists(compressed_file):
                 os.remove(compressed_file)
         except OSError as e:
             logger.warning(f"Cleanup failed: {str(e)}")
+            # Continue even if cleanup fails - it's not critical
 
 def perform_incremental_backup(config, base_prefix):
     """
@@ -105,6 +110,7 @@ def perform_incremental_backup(config, base_prefix):
     backup_dir = os.path.join(config.get('LOCAL_TEMP_DIR'), f'inc_{timestamp}')
     base_dir = os.path.join(config.get('LOCAL_TEMP_DIR'), 'base_backup')
     s3_prefix = f"{config.get('INCREMENTAL_BACKUP_PREFIX')}/{timestamp}"
+    compressed_file = f"{backup_dir}.tar.gz"
     
     try:
         # Create backup directories
@@ -127,7 +133,6 @@ def perform_incremental_backup(config, base_prefix):
             return False
             
         # Compress the backup
-        compressed_file = f"{backup_dir}.tar.gz"
         if not utils.compress_directory(backup_dir, compressed_file):
             logger.error("Backup compression failed")
             return False
@@ -154,14 +159,17 @@ def perform_incremental_backup(config, base_prefix):
     finally:
         # Cleanup
         try:
+            # Use shutil.rmtree for directories since they may not be empty
             if os.path.exists(backup_dir):
-                os.rmdir(backup_dir)
+                import shutil
+                shutil.rmtree(backup_dir)
             if os.path.exists(base_dir):
-                os.rmdir(base_dir)
+                shutil.rmtree(base_dir)
             if os.path.exists(compressed_file):
                 os.remove(compressed_file)
         except OSError as e:
             logger.warning(f"Cleanup failed: {str(e)}")
+            # Continue even if cleanup fails - it's not critical
 
 def get_latest_full_backup_prefix(s3_bucket, full_backup_prefix, config):
     """

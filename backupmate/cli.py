@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import sys
 from typing import Optional, Dict, Any
 from pathlib import Path
@@ -130,6 +131,11 @@ def main() -> Optional[int]:
     args = parser.parse_args()
 
     try:
+        # Check if running as root/sudo for backup and restore commands
+        if args.command in ["backup", "restore"] and os.geteuid() != 0:
+            print("Error: backup and restore commands must be run with sudo", file=sys.stderr)
+            return 1
+
         # Load and validate configuration
         config = load_config()
         if not validate_config(config):

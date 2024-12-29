@@ -141,6 +141,59 @@ def list_objects(s3_bucket, prefix, config):
         logger.error(f"Unexpected error listing S3 objects: {str(e)}")
         return []
 
+def upload_file(local_path, s3_bucket, s3_key, config):
+    """
+    Uploads a single file to S3.
+
+    Args:
+        local_path (str): Path to the local file to upload
+        s3_bucket (str): Name of the S3 bucket
+        s3_key (str): Key (path) in the S3 bucket
+        config (dict): Configuration containing AWS credentials
+
+    Returns:
+        bool: True on success, False on failure
+    """
+    if not os.path.exists(local_path):
+        logger.error(f"Local file {local_path} does not exist")
+        return False
+
+    try:
+        s3_client = _get_s3_client(config)
+        logger.info(f"Uploading {local_path} to s3://{s3_bucket}/{s3_key}")
+        s3_client.upload_file(local_path, s3_bucket, s3_key)
+        return True
+    except ClientError as e:
+        logger.error(f"Failed to upload {local_path} to S3: {str(e)}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error uploading file to S3: {str(e)}")
+        return False
+
+def delete_object(s3_bucket, s3_key, config):
+    """
+    Deletes an object from S3.
+
+    Args:
+        s3_bucket (str): Name of the S3 bucket
+        s3_key (str): Key (path) of the object to delete
+        config (dict): Configuration containing AWS credentials
+
+    Returns:
+        bool: True on success, False on failure
+    """
+    try:
+        s3_client = _get_s3_client(config)
+        logger.info(f"Deleting s3://{s3_bucket}/{s3_key}")
+        s3_client.delete_object(Bucket=s3_bucket, Key=s3_key)
+        return True
+    except ClientError as e:
+        logger.error(f"Failed to delete object from S3: {str(e)}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error deleting object from S3: {str(e)}")
+        return False
+
 def get_latest_backup_prefix(s3_bucket, prefix, config):
     """
     Retrieves the prefix of the latest backup based on timestamp in the key.

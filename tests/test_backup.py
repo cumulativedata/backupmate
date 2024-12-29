@@ -53,7 +53,10 @@ class TestBackup(unittest.TestCase):
     @patch('backupmate.backup.os.makedirs')
     @patch('backupmate.backup.os.path.exists')
     @patch('backupmate.backup.mariadb.take_full_backup')
-    def test_perform_full_backup_failure(self, mock_take_backup, mock_exists, mock_makedirs):
+    @patch('backupmate.backup.shutil.rmtree')
+    @patch('backupmate.backup.os.remove')
+    def test_perform_full_backup_failure(self, mock_remove, mock_rmtree, mock_take_backup, 
+                                       mock_exists, mock_makedirs):
         """Tests full backup failure handling."""
         mock_exists.return_value = True
         mock_take_backup.return_value = False
@@ -62,6 +65,49 @@ class TestBackup(unittest.TestCase):
         
         self.assertFalse(result)
         mock_take_backup.assert_called_once()
+        # Verify cleanup was attempted
+        mock_rmtree.assert_called_once()
+        mock_remove.assert_called_once()
+
+    @patch('backupmate.backup.os.makedirs')
+    @patch('backupmate.backup.os.path.exists')
+    @patch('backupmate.backup.mariadb.take_full_backup')
+    @patch('backupmate.backup.mariadb.prepare_backup')
+    @patch('backupmate.backup.shutil.rmtree')
+    @patch('backupmate.backup.os.remove')
+    def test_perform_full_backup_prepare_failure(self, mock_remove, mock_rmtree, 
+                                               mock_prepare, mock_take_backup,
+                                               mock_exists, mock_makedirs):
+        """Tests backup preparation failure handling."""
+        mock_exists.return_value = True
+        mock_take_backup.return_value = True
+        mock_prepare.return_value = False
+        
+        result = backup.perform_full_backup(self.config)
+        
+        self.assertFalse(result)
+        mock_take_backup.assert_called_once()
+        mock_prepare.assert_called_once()
+        # Verify cleanup was attempted
+        mock_rmtree.assert_called_once()
+        mock_remove.assert_called_once()
+
+    @patch('backupmate.backup.os.makedirs')
+    @patch('backupmate.backup.os.path.exists')
+    @patch('backupmate.backup.mariadb.take_full_backup')
+    @patch('backupmate.backup.shutil.rmtree')
+    def test_cleanup_continues_on_error(self, mock_rmtree, mock_take_backup,
+                                      mock_exists, mock_makedirs):
+        """Tests that cleanup continues even if some operations fail."""
+        mock_exists.return_value = True
+        mock_take_backup.return_value = False
+        mock_rmtree.side_effect = OSError("Failed to remove directory")
+        
+        result = backup.perform_full_backup(self.config)
+        
+        self.assertFalse(result)
+        mock_take_backup.assert_called_once()
+        mock_rmtree.assert_called_once()
         
     @patch('backupmate.backup.os.makedirs')
     @patch('backupmate.backup.os.path.exists')
@@ -99,7 +145,10 @@ class TestBackup(unittest.TestCase):
     @patch('backupmate.backup.os.makedirs')
     @patch('backupmate.backup.os.path.exists')
     @patch('backupmate.backup.s3.download_directory')
-    def test_perform_incremental_backup_failure(self, mock_download, mock_exists, mock_makedirs):
+    @patch('backupmate.backup.shutil.rmtree')
+    @patch('backupmate.backup.os.remove')
+    def test_perform_incremental_backup_failure(self, mock_remove, mock_rmtree, 
+                                              mock_download, mock_exists, mock_makedirs):
         """Tests incremental backup failure handling."""
         base_prefix = 'backups/full/20230101_000000'
         mock_exists.return_value = True
@@ -109,6 +158,52 @@ class TestBackup(unittest.TestCase):
         
         self.assertFalse(result)
         mock_download.assert_called_once()
+        # Verify cleanup was attempted for both directories
+        self.assertEqual(mock_rmtree.call_count, 2)  # backup_dir and base_dir
+        mock_remove.assert_called_once()
+
+    @patch('backupmate.backup.os.makedirs')
+    @patch('backupmate.backup.os.path.exists')
+    @patch('backupmate.backup.s3.download_directory')
+    @patch('backupmate.backup.mariadb.take_incremental_backup')
+    @patch('backupmate.backup.shutil.rmtree')
+    @patch('backupmate.backup.os.remove')
+    def test_perform_incremental_backup_mariadb_failure(self, mock_remove, mock_rmtree,
+                                                      mock_take_backup, mock_download,
+                                                      mock_exists, mock_makedirs):
+        """Tests incremental backup mariadb failure handling."""
+        base_prefix = 'backups/full/20230101_000000'
+        mock_exists.return_value = True
+        mock_download.return_value = True
+        mock_take_backup.return_value = False
+        
+        result = backup.perform_incremental_backup(self.config, base_prefix)
+        
+        self.assertFalse(result)
+        mock_download.assert_called_once()
+        mock_take_backup.assert_called_once()
+        # Verify cleanup was attempted for both directories
+        self.assertEqual(mock_rmtree.call_count, 2)  # backup_dir and base_dir
+        mock_remove.assert_called_once()
+
+    @patch('backupmate.backup.os.makedirs')
+    @patch('backupmate.backup.os.path.exists')
+    @patch('backupmate.backup.s3.download_directory')
+    @patch('backupmate.backup.shutil.rmtree')
+    def test_incremental_cleanup_continues_on_error(self, mock_rmtree, mock_download,
+                                                  mock_exists, mock_makedirs):
+        """Tests that incremental backup cleanup continues even if some operations fail."""
+        base_prefix = 'backups/full/20230101_000000'
+        mock_exists.return_value = True
+        mock_download.return_value = False
+        mock_rmtree.side_effect = OSError("Failed to remove directory")
+        
+        result = backup.perform_incremental_backup(self.config, base_prefix)
+        
+        self.assertFalse(result)
+        mock_download.assert_called_once()
+        # Should try to remove both directories even if first one fails
+        self.assertEqual(mock_rmtree.call_count, 2)
         
     @patch('backupmate.backup.s3.get_latest_backup_prefix')
     def test_get_latest_full_backup_prefix_success(self, mock_get_latest):
