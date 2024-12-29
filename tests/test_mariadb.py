@@ -75,11 +75,27 @@ class TestMariadb(unittest.TestCase):
         incremental_dirs = ['inc1', 'inc2']
         result = mariadb.prepare_backup('backup_dir', incremental_dirs, config)
         self.assertTrue(result)
-        mock_run.assert_called_once_with(
-            ['/usr/bin/mariabackup', '--prepare', '--target-dir=backup_dir', '--incremental-dir=inc1', '--incremental-dir=inc2'],
-            check=True,
-            capture_output=True
-        )
+        
+        expected_calls = [
+            # First prepare the base backup
+            call(
+                ['/usr/bin/mariabackup', '--prepare', '--target-dir=backup_dir'],
+                check=True,
+                capture_output=True
+            ),
+            # Then apply each incremental one at a time
+            call(
+                ['/usr/bin/mariabackup', '--prepare', '--target-dir=backup_dir', '--incremental-dir=inc1'],
+                check=True,
+                capture_output=True
+            ),
+            call(
+                ['/usr/bin/mariabackup', '--prepare', '--target-dir=backup_dir', '--incremental-dir=inc2'],
+                check=True,
+                capture_output=True
+            )
+        ]
+        mock_run.assert_has_calls(expected_calls)
 
     @patch('backupmate.mariadb.subprocess.run')
     def test_prepare_backup_failure_calledprocesserror(self, mock_run):

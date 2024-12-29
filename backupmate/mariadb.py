@@ -175,31 +175,48 @@ def take_incremental_backup(target_dir, basedir, config):
 
 def prepare_backup(target_dir, incremental_dirs=None, config=None):
     """
-    Prepares the backup by applying logs.
+    Prepares the backup by applying logs. For incremental backups, this follows the MariaDB
+    documentation process of:
+    1. First preparing the base backup
+    2. Then applying each incremental backup one at a time in sequence
 
     Args:
         target_dir (str): The directory of the backup to prepare.
-        incremental_dirs (list, optional): List of incremental backup directories. Defaults to None.
+        incremental_dirs (list, optional): List of incremental backup directories in chronological order. Defaults to None.
         config (dict, optional): The configuration parameters. Defaults to None.
 
     Returns:
         bool: True on success, False on failure.
     """
     mariadb_backup_path = config.get('MARIADB_BACKUP_PATH')
-    command = [
+    
+    # First prepare the base backup
+    base_command = [
         mariadb_backup_path,
         "--prepare",
         f"--target-dir={target_dir}",
     ]
-    if incremental_dirs:
-        for inc_dir in incremental_dirs:
-            command.append(f"--incremental-dir={inc_dir}")
-
-    logger.info(f"Preparing backup in {target_dir}")
-    print(f"Executing command: {' '.join(command)}")
+    
+    logger.info(f"Preparing base backup in {target_dir}")
+    print(f"Executing command: {' '.join(base_command)}")
     try:
-        subprocess.run(command, check=True, capture_output=True)
-        logger.info(f"Backup in {target_dir} prepared successfully.")
+        subprocess.run(base_command, check=True, capture_output=True)
+        logger.info(f"Base backup in {target_dir} prepared successfully.")
+        
+        # If we have incremental backups, apply them one at a time
+        if incremental_dirs:
+            for inc_dir in incremental_dirs:
+                inc_command = [
+                    mariadb_backup_path,
+                    "--prepare",
+                    f"--target-dir={target_dir}",
+                    f"--incremental-dir={inc_dir}"
+                ]
+                logger.info(f"Applying incremental backup from {inc_dir}")
+                print(f"Executing command: {' '.join(inc_command)}")
+                subprocess.run(inc_command, check=True, capture_output=True)
+                logger.info(f"Incremental backup from {inc_dir} applied successfully.")
+        
         return True
     except subprocess.CalledProcessError as e:
         logger.error(f"Preparing backup in {target_dir} failed: {e}")

@@ -25,7 +25,16 @@ def handle_backup(args: argparse.Namespace, config: Dict[str, Any], logger: Any)
             success = perform_full_backup(config)
         else:
             log_info(logger, "Starting incremental backup")
-            success = perform_incremental_backup(config)
+            # Get the latest full backup prefix to use as base
+            base_prefix = get_latest_full_backup_prefix(
+                config['S3_BUCKET_NAME'],
+                config['FULL_BACKUP_PREFIX'],
+                config
+            )
+            if not base_prefix:
+                log_error(logger, "No full backup found to base incremental backup on")
+                return False
+            success = perform_incremental_backup(config, base_prefix)
 
         if success:
             log_info(logger, "Backup completed successfully")
@@ -107,10 +116,12 @@ def handle_list(args: argparse.Namespace, config: Dict[str, Any], logger: Any) -
             config
         )
         
-        output = {
-            'full_backups': full_backups,
-            'incremental_backups': incremental_backups
-        }
+        # Transform into a list of backups with type field
+        output = []
+        for backup in full_backups:
+            output.append({'id': backup, 'type': 'full'})
+        for backup in incremental_backups:
+            output.append({'id': backup, 'type': 'incremental'})
         
         if args.json:
             print(json.dumps(output, indent=2))

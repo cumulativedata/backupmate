@@ -394,6 +394,110 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
             self.__class__.logger.error(f"Failed to verify database state: {e}")
             return False
 
+    def test_incremental_backup_preparation(self):
+        """Test that incremental backups are prepared correctly according to MariaDB documentation."""
+        # Start test MariaDB instance
+        self.setup_test_mariadb_instance()
+        self.logger.info("Test MariaDB instance started")
+
+        # Create initial test data
+        self.create_test_data()
+        initial_data = self.get_test_data()
+        self.assertTrue(initial_data, "Initial test data not found")
+        
+        # Take full backup
+        os.environ['IS_INTEGRATION_TEST'] = 'true'
+        sys.argv = ['backupmate', 'backup', '--full']
+        result = cli.main()
+        os.environ.pop('IS_INTEGRATION_TEST', None)
+        self.assertEqual(result, 0, "Full backup command failed")
+        
+        # Sleep for 1 second
+        time.sleep(1)
+        
+        # Make some changes to the data
+        sql_script1 = """
+            USE test_db;
+            INSERT INTO users VALUES (4, "Alice"), (5, "Charlie");
+            INSERT INTO orders VALUES (4, 4, 150.75), (5, 5, 300.25);
+        """
+        subprocess.run(
+            ['mariadb', f'--socket={self.TEST_DATADIR}.sock', '--user=root', '-e', sql_script1],
+            check=True
+        )
+        
+        # Take first incremental backup
+        os.environ['IS_INTEGRATION_TEST'] = 'true'
+        sys.argv = ['backupmate', 'backup']  # Incremental is default when --full is not specified
+        result = cli.main()
+        os.environ.pop('IS_INTEGRATION_TEST', None)
+        self.assertEqual(result, 0, "First incremental backup command failed")
+        
+        # Sleep for 1 second
+        time.sleep(1)
+        
+        # Make more changes to the data
+        sql_script2 = """
+            USE test_db;
+            INSERT INTO users VALUES (6, "Dave"), (7, "Eve");
+            INSERT INTO orders VALUES (6, 6, 200.00), (7, 7, 250.50);
+        """
+        subprocess.run(
+            ['mariadb', f'--socket={self.TEST_DATADIR}.sock', '--user=root', '-e', sql_script2],
+            check=True
+        )
+        
+        # Take second incremental backup
+        os.environ['IS_INTEGRATION_TEST'] = 'true'
+        sys.argv = ['backupmate', 'backup']  # Incremental is default when --full is not specified
+        result = cli.main()
+        os.environ.pop('IS_INTEGRATION_TEST', None)
+        self.assertEqual(result, 0, "Second incremental backup command failed")
+        
+        # Sleep for 1 second
+        time.sleep(1)
+        
+        # Get the latest backup ID from the list command output
+        import json
+        import io
+        from contextlib import redirect_stdout
+
+        # Capture the output of list command
+        output = io.StringIO()
+        with redirect_stdout(output):
+            sys.argv = ['backupmate', 'list', '--json']
+            result = cli.main()
+        self.assertEqual(result, 0, "List command failed")
+        
+        # Parse the JSON output
+        try:
+            backups = json.loads(output.getvalue())
+            # Get the latest incremental backup
+            incremental_backups = [b for b in backups if b['type'] == 'incremental']
+            self.assertTrue(len(incremental_backups) > 0, "No incremental backups found")
+            latest_backup = incremental_backups[-1]['id']
+            self.logger.info(f"Using latest incremental backup: {latest_backup}")
+        except json.JSONDecodeError as e:
+            raise Exception(f"Failed to parse backup list output: {e}\nOutput was: {output.getvalue()}")
+        except (KeyError, IndexError) as e:
+            raise Exception(f"Unexpected backup list format: {e}\nOutput was: {output.getvalue()}")
+        
+        # Clean up test data to simulate data loss
+        self.cleanup_test_data()
+        
+        # Restore using the latest incremental backup
+        # This will automatically prepare the full backup and apply incrementals
+        os.environ['IS_INTEGRATION_TEST'] = 'true'
+        sys.argv = ['backupmate', 'restore', latest_backup, '--copy-back']
+        result = cli.main()
+        os.environ.pop('IS_INTEGRATION_TEST', None)
+        self.assertEqual(result, 0, "Restore command failed")
+        
+        # Verify all data is present after restore
+        restored_data = self.get_test_data()
+        self.assertTrue('Dave' in restored_data and 'Eve' in restored_data,
+                       "Latest data not found in restored database")
+
     def test_backup_restore_cycle_with_backup_id(self):
         """Test backup and restore cycle using specific backup ID."""
                 # Start test MariaDB instance
@@ -416,21 +520,30 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
         os.environ.pop('IS_INTEGRATION_TEST', None)
         self.assertEqual(result, 0, "Full backup command failed")
         
-        # Step 2: List and verify backup exists in S3
-        sys.argv = ['backupmate', 'list', '--json']
-        result = cli.main()
+        # Get the latest backup ID from the list command output
+        import json
+        import io
+        from contextlib import redirect_stdout
+
+        # Capture the output of list command
+        output = io.StringIO()
+        with redirect_stdout(output):
+            sys.argv = ['backupmate', 'list', '--json']
+            result = cli.main()
         self.assertEqual(result, 0, "List command failed")
         
-        # Verify backup files exist in S3
-        objects = s3.list_objects(
-            self.config['S3_BUCKET_NAME'],
-            self.config['FULL_BACKUP_PREFIX'],
-            self.config
-        )
-        self.assertTrue(len(objects) > 0, "No backup files found in S3")
-        
-        # Get the latest backup ID
-        latest_backup = sorted(objects)[-1]
+        # Parse the JSON output
+        try:
+            backups = json.loads(output.getvalue())
+            # Get the latest full backup
+            full_backups = [b for b in backups if b['type'] == 'full']
+            self.assertTrue(len(full_backups) > 0, "No full backups found")
+            latest_backup = full_backups[-1]['id']
+            self.logger.info(f"Using latest full backup: {latest_backup}")
+        except json.JSONDecodeError as e:
+            raise Exception(f"Failed to parse backup list output: {e}\nOutput was: {output.getvalue()}")
+        except (KeyError, IndexError) as e:
+            raise Exception(f"Unexpected backup list format: {e}\nOutput was: {output.getvalue()}")
         
         # Clean up backup folder after upload
         backup_folder = config.integration_overrides['LOCAL_TEMP_DIR']

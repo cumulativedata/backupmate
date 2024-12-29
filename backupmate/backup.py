@@ -21,12 +21,36 @@ def _init_db(config):
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         backup_type TEXT NOT NULL,
         backup_prefix TEXT NOT NULL,
+        local_path TEXT,
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
         status TEXT NOT NULL
     )
     ''')
     conn.commit()
     return conn
+
+def _clean_backup_chain(config):
+    """Clean up the existing backup chain directory."""
+    chain_dir = os.path.join(config.get('LOCAL_TEMP_DIR'), 'chain')
+    if os.path.exists(chain_dir):
+        shutil.rmtree(chain_dir)
+    os.makedirs(chain_dir, exist_ok=True)
+
+def get_latest_local_backup(config):
+    """Get the latest local backup path from the database."""
+    try:
+        conn = _init_db(config)
+        cursor = conn.cursor()
+        cursor.execute('''
+        SELECT local_path FROM backups 
+        WHERE local_path IS NOT NULL 
+        ORDER BY timestamp DESC LIMIT 1
+        ''')
+        result = cursor.fetchone()
+        return result[0] if result else None
+    finally:
+        if conn:
+            conn.close()
 
 def perform_full_backup(config):
     """
@@ -39,28 +63,37 @@ def perform_full_backup(config):
         bool: True on success, False on failure
     """
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    backup_dir = os.path.join(config.get('LOCAL_TEMP_DIR'), f'full_{timestamp}')
+    temp_dir = os.path.join(config.get('LOCAL_TEMP_DIR'), f'full_{timestamp}')
+    chain_dir = os.path.join(config.get('LOCAL_TEMP_DIR'), 'chain')
+    backup_dir = os.path.join(chain_dir, f'full_{timestamp}')
     s3_prefix = f"{config.get('FULL_BACKUP_PREFIX')}"
-    compressed_file = f"{backup_dir}.tar.gz"
+    compressed_file = f"{temp_dir}.tar.gz"
     
     try:
-        # Create backup directory
+        # Clean up existing backup chain for new full backup
+        _clean_backup_chain(config)
+        
+        # Create backup directories
+        os.makedirs(temp_dir, exist_ok=True)
         os.makedirs(backup_dir, exist_ok=True)
         
         # Take full backup
-        if not mariadb.take_full_backup(backup_dir, config):
+        if not mariadb.take_full_backup(temp_dir, config):
             logger.error("Full backup failed - mariadb-backup command failed")
             # Don't attempt further steps if backup fails
             return False
             
         # Prepare the backup
-        if not mariadb.prepare_backup(backup_dir, config=config):
+        if not mariadb.prepare_backup(temp_dir, config=config):
             logger.error("Backup preparation failed - mariadb-backup prepare command failed")
             # Don't attempt further steps if preparation fails
             return False
             
-        # Compress the backup
-        if not utils.compress_directory(backup_dir, compressed_file):
+        # Copy prepared backup to chain directory
+        shutil.copytree(temp_dir, backup_dir, dirs_exist_ok=True)
+        
+        # Compress the backup for S3
+        if not utils.compress_directory(temp_dir, compressed_file):
             logger.error("Backup compression failed")
             return False
             
@@ -74,8 +107,8 @@ def perform_full_backup(config):
             logger.error("S3 upload failed")
             return False
             
-        # Record successful backup
-        record_backup_metadata(config, 'full', s3_prefix)
+        # Record successful backup with local path
+        record_backup_metadata(config, 'full', s3_prefix, backup_dir)
         
         logger.info(f"Full backup completed successfully: {s3_prefix}")
         return True
@@ -87,14 +120,14 @@ def perform_full_backup(config):
         # Cleanup
         logger.debug("Starting cleanup...")
         
-        # Clean up backup directory
-        logger.debug(f"Checking backup_dir existence: {backup_dir} - {os.path.exists(backup_dir)}")
-        if os.path.exists(backup_dir):
+        # Clean up temporary directory
+        logger.debug(f"Checking temp_dir existence: {temp_dir} - {os.path.exists(temp_dir)}")
+        if os.path.exists(temp_dir):
             try:
-                logger.debug(f"Removing backup directory: {backup_dir}")
-                shutil.rmtree(backup_dir)
+                logger.debug(f"Removing temporary directory: {temp_dir}")
+                shutil.rmtree(temp_dir)
             except OSError as e:
-                logger.warning(f"Failed to remove backup directory: {str(e)}")
+                logger.warning(f"Failed to remove temporary directory: {str(e)}")
         
         # Clean up compressed file
         logger.debug(f"Checking compressed file existence: {compressed_file} - {os.path.exists(compressed_file)}")
@@ -111,45 +144,39 @@ def perform_incremental_backup(config, base_prefix):
     
     Args:
         config (dict): Configuration parameters
-        base_prefix (str): S3 prefix of the base backup
+        base_prefix (str): S3 prefix of the base backup (not used anymore, kept for compatibility)
         
     Returns:
         bool: True on success, False on failure
     """
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    backup_dir = os.path.join(config.get('LOCAL_TEMP_DIR'), f'inc_{timestamp}')
-    base_dir = os.path.join(config.get('LOCAL_TEMP_DIR'), 'base_backup')
+    temp_dir = os.path.join(config.get('LOCAL_TEMP_DIR'), f'inc_{timestamp}')
+    chain_dir = os.path.join(config.get('LOCAL_TEMP_DIR'), 'chain')
+    backup_dir = os.path.join(chain_dir, f'inc_{timestamp}')
     s3_prefix = f"{config.get('INCREMENTAL_BACKUP_PREFIX')}"
-    compressed_file = f"{backup_dir}.tar.gz"
+    compressed_file = f"{temp_dir}.tar.gz"
     
     try:
         # Create backup directories
-        logger.debug(f"Creating backup directory: {backup_dir}")
+        os.makedirs(temp_dir, exist_ok=True)
         os.makedirs(backup_dir, exist_ok=True)
-        logger.debug(f"Creating base directory: {base_dir}")
-        os.makedirs(base_dir, exist_ok=True)
         
-        try:
-            # Download base backup
-            if not s3.download_directory(
-                config.get('S3_BUCKET_NAME'),
-                base_prefix,
-                base_dir,
-                config
-            ):
-                logger.error("Failed to download base backup")
-                return False
-        except Exception as e:
-            logger.error(f"Failed to download base backup: {str(e)}")
+        # Get the latest local backup to use as base
+        base_dir = get_latest_local_backup(config)
+        if not base_dir or not os.path.exists(base_dir):
+            logger.error("No local backup found to base incremental on")
             return False
             
-        # Take incremental backup
-        if not mariadb.take_incremental_backup(backup_dir, base_dir, config):
+        # Take incremental backup using local base
+        if not mariadb.take_incremental_backup(temp_dir, base_dir, config):
             logger.error("Incremental backup failed")
             return False
             
-        # Compress the backup
-        if not utils.compress_directory(backup_dir, compressed_file):
+        # Copy prepared backup to chain directory
+        shutil.copytree(temp_dir, backup_dir, dirs_exist_ok=True)
+        
+        # Compress the backup for S3
+        if not utils.compress_directory(temp_dir, compressed_file):
             logger.error("Backup compression failed")
             return False
             
@@ -163,8 +190,8 @@ def perform_incremental_backup(config, base_prefix):
             logger.error("S3 upload failed")
             return False
             
-        # Record successful backup
-        record_backup_metadata(config, 'incremental', s3_prefix)
+        # Record successful backup with local path
+        record_backup_metadata(config, 'incremental', s3_prefix, backup_dir)
         
         logger.info(f"Incremental backup completed successfully: {s3_prefix}")
         return True
@@ -176,23 +203,14 @@ def perform_incremental_backup(config, base_prefix):
         # Cleanup
         logger.debug("Starting cleanup...")
         
-        # Clean up backup directory
-        logger.debug(f"Checking backup_dir existence: {backup_dir} - {os.path.exists(backup_dir)}")
-        if os.path.exists(backup_dir):
+        # Clean up temporary directory
+        logger.debug(f"Checking temp_dir existence: {temp_dir} - {os.path.exists(temp_dir)}")
+        if os.path.exists(temp_dir):
             try:
-                logger.debug(f"Removing backup directory: {backup_dir}")
-                shutil.rmtree(backup_dir)
+                logger.debug(f"Removing temporary directory: {temp_dir}")
+                shutil.rmtree(temp_dir)
             except OSError as e:
-                logger.warning(f"Failed to remove backup directory: {str(e)}")
-        
-        # Clean up base directory
-        logger.debug(f"Checking base_dir existence: {base_dir} - {os.path.exists(base_dir)}")
-        if os.path.exists(base_dir):
-            try:
-                logger.debug(f"Removing base directory: {base_dir}")
-                shutil.rmtree(base_dir)
-            except OSError as e:
-                logger.warning(f"Failed to remove base directory: {str(e)}")
+                logger.warning(f"Failed to remove temporary directory: {str(e)}")
         
         # Clean up compressed file
         logger.debug(f"Checking compressed file existence: {compressed_file} - {os.path.exists(compressed_file)}")
@@ -260,7 +278,7 @@ def list_backups_from_db(config, output_json=False):
         if conn:
             conn.close()
 
-def record_backup_metadata(config, backup_type, backup_prefix):
+def record_backup_metadata(config, backup_type, backup_prefix, local_path=None):
     """
     Records backup metadata to the database.
     
@@ -268,6 +286,7 @@ def record_backup_metadata(config, backup_type, backup_prefix):
         config (dict): Configuration parameters
         backup_type (str): Type of backup ('full' or 'incremental')
         backup_prefix (str): S3 prefix of the backup
+        local_path (str, optional): Path to the local backup directory
         
     Returns:
         bool: True on success, False on failure
@@ -277,9 +296,9 @@ def record_backup_metadata(config, backup_type, backup_prefix):
         cursor = conn.cursor()
         
         cursor.execute('''
-        INSERT INTO backups (backup_type, backup_prefix, status)
-        VALUES (?, ?, ?)
-        ''', (backup_type, backup_prefix, 'success'))
+        INSERT INTO backups (backup_type, backup_prefix, local_path, status)
+        VALUES (?, ?, ?, ?)
+        ''', (backup_type, backup_prefix, local_path, 'success'))
         
         conn.commit()
         return True

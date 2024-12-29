@@ -96,8 +96,16 @@ class TestCLI(unittest.TestCase):
                 
                 # Verify JSON output
                 output = json.loads(stdout.getvalue())
-                self.assertIn('full_backups', output)
-                self.assertIn('incremental_backups', output)
+                self.assertTrue(isinstance(output, list))
+                # Should have 4 backups total (2 full + 2 incremental)
+                self.assertEqual(len(output), 4)
+                # Verify we have both types
+                types = {b['type'] for b in output}
+                self.assertEqual(types, {'full', 'incremental'})
+                # Verify structure of backup objects
+                for backup in output:
+                    self.assertIn('type', backup)
+                    self.assertIn('id', backup)
         finally:
             sys.stdout = sys.__stdout__
 
@@ -255,8 +263,9 @@ class TestCLI(unittest.TestCase):
                 output = stdout.getvalue()
                 self.assertIn('Full Backups:', output)
                 self.assertIn('Incremental Backups:', output)
-                self.assertIn('backup1', output)
-                self.assertIn('backup2', output)
+                # Each backup should appear in output
+                for backup_id in ['backup1', 'backup2']:
+                    self.assertIn(backup_id, output)
             finally:
                 sys.stdout = sys.__stdout__
 
