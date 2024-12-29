@@ -149,16 +149,29 @@ pip install -e .
 
 ### Running Tests
 
+#### Unit Tests
+Unit tests are safe to run as they use mocking for all external operations (database, S3, file system):
 ```bash
-# Run all tests
-python -m unittest discover -s tests
-
-# Run a specific test file
-python -m unittest tests.test_specific
-
-# Run integration tests
-python -m unittest tests.integration_backup_restore
+# Run all unit tests with verbose output
+~/venv_backupmate/bin/python -m unittest discover -s tests -v
 ```
+
+#### Integration Tests
+Integration tests require sudo privileges as they create a test MariaDB instance:
+```bash
+# Run integration test suite
+sudo ~/venv_backupmate/bin/python -m unittest tests.integration_backup_restore.BackupRestoreIntegrationTest
+```
+
+The integration test performs a complete backup and restore cycle:
+1. Sets up a test MariaDB instance on port 3307
+2. Creates test databases and tables with sample data
+3. Performs a full backup to S3
+4. Simulates data loss by dropping the test database
+5. Restores from the backup
+6. Verifies the restored data matches the original
+
+This ensures the entire backup/restore workflow functions correctly in a real environment.
 
 ### Error Handling and Logging
 
