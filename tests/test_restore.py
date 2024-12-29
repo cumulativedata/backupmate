@@ -61,27 +61,80 @@ class TestRestore(unittest.TestCase):
 
     @patch('backupmate.s3.download_directory')
     @patch('backupmate.mariadb.prepare_backup')
-    def test_download_and_prepare_backup_success(self, mock_prepare_backup, mock_download):
+    @patch('backupmate.utils.decompress_archive')
+    @patch('os.makedirs')
+    @patch('os.listdir')
+    @patch('os.path.join')
+    def test_download_and_prepare_backup_success(self, mock_join, mock_listdir, mock_makedirs, 
+                                               mock_decompress, mock_prepare_backup, mock_download):
         """Tests successful backup download and preparation."""
+        # Configure mocks
         mock_download.return_value = True
+        mock_decompress.return_value = True
         mock_prepare_backup.return_value = True
+        mock_listdir.side_effect = [
+            ['backup.tar.gz'],  # First call for tar files
+            ['backup_dir']      # Second call for extracted dirs
+        ]
+        mock_join.side_effect = lambda *args: '/'.join(args)
 
         result = restore.download_and_prepare_backup(self.backup_prefix, 
                                                    self.config['LOCAL_TEMP_DIR'], 
                                                    self.config)
 
         self.assertTrue(result)
+        # Verify temp directory creation
+        mock_makedirs.assert_any_call('/tmp/test_restore/temp', exist_ok=True)
+        # Verify download to temp directory
         mock_download.assert_called_once_with(self.config['S3_BUCKET_NAME'], 
                                             self.backup_prefix,
-                                            self.config['LOCAL_TEMP_DIR'], 
+                                            '/tmp/test_restore/temp', 
                                             self.config)
-        mock_prepare_backup.assert_called_once_with(self.config['LOCAL_TEMP_DIR'], 
-                                                  config=self.config)
+        # Verify archive extraction
+        mock_decompress.assert_called_once()
+        # Verify backup preparation on extracted directory
+        mock_prepare_backup.assert_called_once()
 
     @patch('backupmate.s3.download_directory')
-    def test_download_and_prepare_backup_download_failure(self, mock_download):
+    @patch('os.makedirs')
+    def test_download_and_prepare_backup_download_failure(self, mock_makedirs, mock_download):
         """Tests handling of S3 download failure."""
         mock_download.return_value = False
+
+        result = restore.download_and_prepare_backup(self.backup_prefix, 
+                                                   self.config['LOCAL_TEMP_DIR'], 
+                                                   self.config)
+
+        self.assertFalse(result)
+        mock_makedirs.assert_called_once()  # Should still try to create temp dir
+
+    @patch('backupmate.s3.download_directory')
+    @patch('backupmate.utils.decompress_archive')
+    @patch('os.makedirs')
+    @patch('os.listdir')
+    def test_download_and_prepare_backup_no_tarfile(self, mock_listdir, mock_makedirs, 
+                                                  mock_decompress, mock_download):
+        """Tests handling of missing tar.gz file."""
+        mock_download.return_value = True
+        mock_listdir.return_value = ['not_a_tarfile.txt']
+
+        result = restore.download_and_prepare_backup(self.backup_prefix, 
+                                                   self.config['LOCAL_TEMP_DIR'], 
+                                                   self.config)
+
+        self.assertFalse(result)
+        mock_decompress.assert_not_called()
+
+    @patch('backupmate.s3.download_directory')
+    @patch('backupmate.utils.decompress_archive')
+    @patch('os.makedirs')
+    @patch('os.listdir')
+    def test_download_and_prepare_backup_extraction_failure(self, mock_listdir, mock_makedirs, 
+                                                          mock_decompress, mock_download):
+        """Tests handling of archive extraction failure."""
+        mock_download.return_value = True
+        mock_listdir.return_value = ['backup.tar.gz']
+        mock_decompress.return_value = False
 
         result = restore.download_and_prepare_backup(self.backup_prefix, 
                                                    self.config['LOCAL_TEMP_DIR'], 

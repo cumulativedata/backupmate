@@ -38,6 +38,11 @@ def setup_logger(name: str, log_file: Optional[str] = None) -> logging.Logger:
     """
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
+    # Prevent propagation to avoid duplicate logs
+    logger.propagate = False
+    
+    # Remove any existing handlers
+    logger.handlers = []
     
     # Create JSON formatter
     formatter = JsonFormatter()

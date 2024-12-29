@@ -160,14 +160,48 @@ def upload_file(local_path, s3_bucket, s3_key, config):
 
     try:
         s3_client = _get_s3_client(config)
-        logger.info(f"Uploading {local_path} to s3://{s3_bucket}/{s3_key}")
-        s3_client.upload_file(local_path, s3_bucket, s3_key)
+        filename = os.path.basename(local_path)
+        full_s3_key = s3_key + filename
+        logger.info(f"Uploading {local_path} to s3://{s3_bucket}/{full_s3_key}")
+        s3_client.upload_file(local_path, s3_bucket, full_s3_key)
         return True
     except ClientError as e:
         logger.error(f"Failed to upload {local_path} to S3: {str(e)}")
         return False
     except Exception as e:
         logger.error(f"Unexpected error uploading file to S3: {str(e)}")
+        return False
+
+def download_file(s3_bucket, s3_key, local_path, config):
+    """
+    Downloads a single file from S3.
+
+    Args:
+        s3_bucket (str): Name of the S3 bucket
+        s3_key (str): Key (path) of the file in S3
+        local_path (str): Path where the file should be downloaded
+        config (dict): Configuration containing AWS credentials
+
+    Returns:
+        bool: True on success, False on failure
+    """
+    try:
+        s3_client = _get_s3_client(config)
+        
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        
+        logger.info(f"Downloading s3://{s3_bucket}/{s3_key} to {local_path}")
+        s3_client.download_file(s3_bucket, s3_key, local_path)
+        
+        logger.info(f"Successfully downloaded file to {local_path}")
+        return True
+        
+    except ClientError as e:
+        logger.error(f"Failed to download from S3: {str(e)}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error downloading from S3: {str(e)}")
         return False
 
 def delete_object(s3_bucket, s3_key, config):

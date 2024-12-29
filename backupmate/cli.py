@@ -50,12 +50,31 @@ def handle_restore(args: argparse.Namespace, config: Dict[str, Any], logger: Any
         restore_method = 'move-back' if args.move_back else 'copy-back'
 
         log_info(logger, "Starting restore operation")
+        # Determine backup identifier based on flags
+        backup_identifier = args.backup_id
+        if args.latest_full:
+            # TODO: Get latest full backup identifier from S3
+            backup_identifier = list_objects(
+                config['S3_BUCKET_NAME'],
+                config['FULL_BACKUP_PREFIX'],
+                config
+            )[-1] if list_objects(config['S3_BUCKET_NAME'], config['FULL_BACKUP_PREFIX'], config) else None
+        elif args.latest_incremental:
+            # TODO: Get latest incremental backup identifier from S3
+            backup_identifier = list_objects(
+                config['S3_BUCKET_NAME'],
+                config['INCREMENTAL_BACKUP_PREFIX'],
+                config
+            )[-1] if list_objects(config['S3_BUCKET_NAME'], config['INCREMENTAL_BACKUP_PREFIX'], config) else None
+
+        if not backup_identifier:
+            log_error(logger, "No backup found to restore")
+            return False
+
         success = restore_specific_backup(
-            backup_identifier=args.backup_id,
+            backup_identifier=backup_identifier,
             restore_method=restore_method,
-            config=config,
-            use_latest_full=args.latest_full,
-            use_latest_incremental=args.latest_incremental
+            config=config
         )
 
         if success:

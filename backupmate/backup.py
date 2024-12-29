@@ -39,7 +39,7 @@ def perform_full_backup(config):
     """
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     backup_dir = os.path.join(config.get('LOCAL_TEMP_DIR'), f'full_{timestamp}')
-    s3_prefix = f"{config.get('FULL_BACKUP_PREFIX')}/{timestamp}"
+    s3_prefix = f"{config.get('FULL_BACKUP_PREFIX')}"
     compressed_file = f"{backup_dir}.tar.gz"
     
     try:
@@ -64,7 +64,7 @@ def perform_full_backup(config):
             return False
             
         # Upload to S3
-        if not s3.upload_directory(
+        if not s3.upload_file(
             compressed_file,
             config.get('S3_BUCKET_NAME'),
             s3_prefix,
@@ -109,7 +109,7 @@ def perform_incremental_backup(config, base_prefix):
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     backup_dir = os.path.join(config.get('LOCAL_TEMP_DIR'), f'inc_{timestamp}')
     base_dir = os.path.join(config.get('LOCAL_TEMP_DIR'), 'base_backup')
-    s3_prefix = f"{config.get('INCREMENTAL_BACKUP_PREFIX')}/{timestamp}"
+    s3_prefix = f"{config.get('INCREMENTAL_BACKUP_PREFIX')}"
     compressed_file = f"{backup_dir}.tar.gz"
     
     try:
@@ -138,7 +138,7 @@ def perform_incremental_backup(config, base_prefix):
             return False
             
         # Upload to S3
-        if not s3.upload_directory(
+        if not s3.upload_file(
             compressed_file,
             config.get('S3_BUCKET_NAME'),
             s3_prefix,

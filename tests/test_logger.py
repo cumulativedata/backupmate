@@ -75,6 +75,7 @@ class TestLogger(unittest.TestCase):
         self.assertEqual(logger.level, logging.INFO)
         self.assertEqual(len(logger.handlers), 1)
         self.assertIsInstance(logger.handlers[0], logging.StreamHandler)
+        self.assertFalse(logger.propagate, "Logger should not propagate to avoid duplicate logs")
         
     def test_setup_logger_with_file(self):
         """Test logger setup with both console and file output."""
@@ -84,6 +85,24 @@ class TestLogger(unittest.TestCase):
         self.assertEqual(len(logger.handlers), 2)
         self.assertIsInstance(logger.handlers[0], logging.StreamHandler)
         self.assertIsInstance(logger.handlers[1], logging.FileHandler)
+        self.assertFalse(logger.propagate, "Logger should not propagate to avoid duplicate logs")
+
+    def test_setup_logger_clears_existing_handlers(self):
+        """Test that setup_logger clears any existing handlers."""
+        # Create logger with initial handler
+        logger_name = "test_handlers"
+        initial_logger = logging.getLogger(logger_name)
+        initial_handler = logging.StreamHandler()
+        initial_logger.addHandler(initial_handler)
+        self.assertEqual(len(initial_logger.handlers), 1)
+        
+        # Setup logger with same name
+        new_logger = setup_logger(logger_name)
+        self.loggers.append(new_logger)
+        
+        # Verify only one handler exists and it's the new one
+        self.assertEqual(len(new_logger.handlers), 1)
+        self.assertNotEqual(new_logger.handlers[0], initial_handler)
         
     def test_log_info(self):
         """Test info level logging."""

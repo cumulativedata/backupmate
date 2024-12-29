@@ -1,8 +1,10 @@
 import os
 import logging
 import subprocess
+from typing import Union
 from . import s3
 from . import mariadb
+from . import utils
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +29,9 @@ def restore_specific_backup(backup_identifier, restore_method, config):
         local_staging_dir = config.get('LOCAL_TEMP_DIR', '/tmp/backupmate_restore')
         os.makedirs(local_staging_dir, exist_ok=True)
 
+        prepared_folder = download_and_prepare_backup(backup_identifier, local_staging_dir, config)
         # Download and prepare backup
-        if not download_and_prepare_backup(backup_identifier, local_staging_dir, config):
+        if not prepared_folder:
             logger.error("Failed to download and prepare backup")
             return False
 
@@ -39,7 +42,7 @@ def restore_specific_backup(backup_identifier, restore_method, config):
 
         try:
             # Restore backup
-            if not mariadb.restore_backup(local_staging_dir, config, method=restore_method):
+            if not mariadb.restore_backup(prepared_folder, config, method=restore_method):
                 logger.error("Failed to restore backup")
                 return False
 
@@ -66,7 +69,7 @@ def download_and_prepare_backup(backup_prefix, local_staging_dir, config):
         config (dict): Configuration parameters
 
     Returns:
-        bool: True on success, False on failure
+        str: Path to prepared backup directory on success, False on failure
     """
     try:
         s3_bucket = config.get('S3_BUCKET_NAME')
@@ -74,18 +77,38 @@ def download_and_prepare_backup(backup_prefix, local_staging_dir, config):
             logger.error("S3_BUCKET_NAME not found in config")
             return False
 
-        # Download backup files
-        if not s3.download_directory(s3_bucket, backup_prefix, local_staging_dir, config):
-            logger.error("Failed to download backup files from S3")
+        # Create a temporary directory for the compressed file
+        temp_dir = os.path.join(local_staging_dir, 'temp')
+        os.makedirs(temp_dir, exist_ok=True)
+
+        # Get the tar.gz filename from the backup prefix
+        tar_filename = os.path.basename(backup_prefix.rstrip('/'))
+        tar_path = os.path.join(temp_dir, tar_filename)
+
+        # Download the backup file directly
+        logger.info(f"Attempting to download backup from s3://{s3_bucket}/{backup_prefix}")
+        if not s3.download_file(s3_bucket, backup_prefix, tar_path, config):
+            logger.error("Failed to download backup file from S3")
+            return False
+
+        if not os.path.exists(tar_path):
+            logger.error(f"Downloaded file not found at expected path: {tar_path}")
+            return False
+        extract_dir = os.path.join(local_staging_dir, 'extracted')
+
+        # Extract the backup
+        backup_dir = utils.decompress_archive(tar_path, extract_dir)
+        if not backup_dir:
+            logger.error("Failed to extract backup archive")
             return False
 
         # Prepare the backup
-        if not mariadb.prepare_backup(local_staging_dir, config=config):
+        if not mariadb.prepare_backup(backup_dir, config=config):
             logger.error("Failed to prepare backup")
             return False
 
         logger.info("Backup downloaded and prepared successfully")
-        return True
+        return backup_dir
 
     except Exception as e:
         logger.error(f"Unexpected error during backup download and preparation: {str(e)}")

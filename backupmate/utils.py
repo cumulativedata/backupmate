@@ -53,13 +53,13 @@ def decompress_archive(archive_path: str, output_path: str) -> bool:
     """
     try:
         archive_path = Path(archive_path)
-        output_path = Path(output_path)
+        output_path_Path = Path(output_path)
         
         if not archive_path.is_file():
             raise FileNotFoundError(f"Archive not found: {archive_path}")
             
         # Ensure output directory exists
-        output_path.mkdir(parents=True, exist_ok=True)
+        output_path_Path.mkdir(parents=True, exist_ok=True)
         
         with tarfile.open(archive_path, "r:gz") as tar:
             # Check for any suspicious paths before extracting
@@ -67,9 +67,9 @@ def decompress_archive(archive_path: str, output_path: str) -> bool:
                 if member.name.startswith('/') or '..' in member.name:
                     raise ValueError(f"Suspicious path in archive: {member.name}")
             # Extract all files
-            tar.extractall(path=output_path)
+            tar.extractall(path=output_path_Path)
             
-        return True
+        return os.path.join(output_path,archive_path.name.rstrip('.tar.gz'))
     except (OSError, tarfile.TarError, ValueError) as e:
         print(f"Error decompressing archive: {e}")
         return False

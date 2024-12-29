@@ -142,7 +142,8 @@ class TestCLI(unittest.TestCase):
         result = handle_restore(args, self.config, self.logger)
         self.assertFalse(result)
 
-    def test_handle_restore_success(self):
+    def test_handle_restore_success_with_backup_id(self):
+        """Test restore with specific backup ID"""
         args = argparse.Namespace(
             backup_id='test',
             latest_full=False,
@@ -155,7 +156,85 @@ class TestCLI(unittest.TestCase):
             mock_restore.return_value = True
             result = handle_restore(args, self.config, self.logger)
             self.assertTrue(result)
-            mock_restore.assert_called_once()
+            mock_restore.assert_called_once_with(
+                backup_identifier='test',
+                restore_method='copy-back',
+                config=self.config
+            )
+
+    @patch('backupmate.cli.list_objects')
+    def test_handle_restore_success_with_latest_full(self, mock_list_objects):
+        """Test restore with --latest-full flag"""
+        args = argparse.Namespace(
+            backup_id=None,
+            latest_full=True,
+            latest_incremental=False,
+            copy_back=True,
+            move_back=False
+        )
+        
+        mock_list_objects.return_value = ['backup1', 'backup2', 'backup3']
+        
+        with patch('backupmate.cli.restore_specific_backup') as mock_restore:
+            mock_restore.return_value = True
+            result = handle_restore(args, self.config, self.logger)
+            self.assertTrue(result)
+            mock_restore.assert_called_once_with(
+                backup_identifier='backup3',  # Should use latest backup
+                restore_method='copy-back',
+                config=self.config
+            )
+            mock_list_objects.assert_called_once_with(
+                self.config['S3_BUCKET_NAME'],
+                self.config['FULL_BACKUP_PREFIX'],
+                self.config
+            )
+
+    @patch('backupmate.cli.list_objects')
+    def test_handle_restore_success_with_latest_incremental(self, mock_list_objects):
+        """Test restore with --latest-incremental flag"""
+        args = argparse.Namespace(
+            backup_id=None,
+            latest_full=False,
+            latest_incremental=True,
+            copy_back=True,
+            move_back=False
+        )
+        
+        mock_list_objects.return_value = ['backup1', 'backup2', 'backup3']
+        
+        with patch('backupmate.cli.restore_specific_backup') as mock_restore:
+            mock_restore.return_value = True
+            result = handle_restore(args, self.config, self.logger)
+            self.assertTrue(result)
+            mock_restore.assert_called_once_with(
+                backup_identifier='backup3',  # Should use latest backup
+                restore_method='copy-back',
+                config=self.config
+            )
+            mock_list_objects.assert_called_once_with(
+                self.config['S3_BUCKET_NAME'],
+                self.config['INCREMENTAL_BACKUP_PREFIX'],
+                self.config
+            )
+
+    @patch('backupmate.cli.list_objects')
+    def test_handle_restore_no_backups_found(self, mock_list_objects):
+        """Test restore when no backups are found"""
+        args = argparse.Namespace(
+            backup_id=None,
+            latest_full=True,
+            latest_incremental=False,
+            copy_back=True,
+            move_back=False
+        )
+        
+        mock_list_objects.return_value = []
+        
+        with patch('backupmate.cli.restore_specific_backup') as mock_restore:
+            result = handle_restore(args, self.config, self.logger)
+            self.assertFalse(result)
+            mock_restore.assert_not_called()
 
     def test_handle_list(self):
         args = argparse.Namespace(json=False)

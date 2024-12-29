@@ -1,7 +1,38 @@
 import subprocess
 import logging
+import os
+import shutil
+import time
 
 logger = logging.getLogger(__name__)
+
+def verify_test_instance(config):
+    """
+    Verifies if this is the test instance by checking for test_db database.
+    Only used during integration testing.
+
+    Args:
+        config (dict): The configuration parameters.
+
+    Returns:
+        bool: True if test instance is detected, False otherwise.
+    """
+    command = [
+        'mariadb',
+        '--user=root',
+        '-e', 'SHOW DATABASES LIKE "test_db";'
+    ]
+    
+    # Add socket file if specified
+    if config.get('MARIADB_SOCKET'):
+        command.append(f"--socket={config['MARIADB_SOCKET']}")
+        
+    print(f"Executing command: {' '.join(command)}")
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, check=True)
+        return 'test_db' in result.stdout
+    except subprocess.CalledProcessError:
+        return False
 
 def take_full_backup(target_dir, config):
     """
@@ -14,6 +45,20 @@ def take_full_backup(target_dir, config):
     Returns:
         bool: True on success, False on failure.
     """
+    # Log integration test status prominently
+    if config.get('IS_INTEGRATION_TEST'):
+        # Use print for better visibility
+        print("="*50)
+        print("=== RUNNING IN INTEGRATION TEST MODE ===")
+        print("="*50)
+        # Ensure socket file is specified for test instance
+        if not config.get('MARIADB_SOCKET'):
+            logger.error("MARIADB_SOCKET must be specified for integration testing")
+            return False
+        # Verify we're backing up the test instance
+        if not verify_test_instance(config):
+            logger.error("Integration test verification failed: test_db not found. Are we connected to the right instance?")
+            return False
     mariadb_backup_path = config.get('MARIADB_BACKUP_PATH')
     db_host = config.get('DB_HOST')
     db_port = config.get('DB_PORT')
@@ -32,10 +77,16 @@ def take_full_backup(target_dir, config):
     ]
     
     # Add socket file if specified
-    if config.get('MYSQL_SOCKET'):
-        command.append(f"--socket={config['MYSQL_SOCKET']}")
+    if config.get('MARIADB_SOCKET'):
+        command.append(f"--socket={config['MARIADB_SOCKET']}")
 
-    logger.info(f"Starting full backup to {target_dir}")
+    # Log connection details for debugging
+    logger.info(f"Starting full backup to {target_dir} with connection details:")
+    logger.info(f"Host: {db_host}, Port: {db_port}")
+    logger.info(f"Socket: {config.get('MARIADB_SOCKET', 'Not specified')}")
+    logger.info(f"User: {db_user}")
+    logger.info(f"Command: {' '.join(command)}")
+    print(f"Executing command: {' '.join(command)}")
     try:
         subprocess.run(command, check=True, capture_output=True)
         logger.info(f"Full backup to {target_dir} completed successfully.")
@@ -63,6 +114,21 @@ def take_incremental_backup(target_dir, basedir, config):
     Returns:
         bool: True on success, False on failure.
     """
+    # Log integration test status prominently
+    if config.get('IS_INTEGRATION_TEST'):
+        # Use print for better visibility
+        print("="*50)
+        print("=== RUNNING IN INTEGRATION TEST MODE ===")
+        print("="*50)
+        # Ensure socket file is specified for test instance
+        if not config.get('MARIADB_SOCKET'):
+            logger.error("MARIADB_SOCKET must be specified for integration testing")
+            return False
+        # Verify we're backing up the test instance
+        if not verify_test_instance(config):
+            logger.error("Integration test verification failed: test_db not found. Are we connected to the right instance?")
+            return False
+            
     mariadb_backup_path = config.get('MARIADB_BACKUP_PATH')
     db_host = config.get('DB_HOST')
     db_port = config.get('DB_PORT')
@@ -82,10 +148,16 @@ def take_incremental_backup(target_dir, basedir, config):
     ]
     
     # Add socket file if specified
-    if config.get('MYSQL_SOCKET'):
-        command.append(f"--socket={config['MYSQL_SOCKET']}")
+    if config.get('MARIADB_SOCKET'):
+        command.append(f"--socket={config['MARIADB_SOCKET']}")
 
-    logger.info(f"Starting incremental backup to {target_dir} based on {basedir}")
+    # Log connection details for debugging
+    logger.info(f"Starting incremental backup to {target_dir} based on {basedir} with connection details:")
+    logger.info(f"Host: {db_host}, Port: {db_port}")
+    logger.info(f"Socket: {config.get('MARIADB_SOCKET', 'Not specified')}")
+    logger.info(f"User: {db_user}")
+    logger.info(f"Command: {' '.join(command)}")
+    print(f"Executing command: {' '.join(command)}")
     try:
         subprocess.run(command, check=True, capture_output=True)
         logger.info(f"Incremental backup to {target_dir} completed successfully.")
@@ -124,6 +196,7 @@ def prepare_backup(target_dir, incremental_dirs=None, config=None):
             command.append(f"--incremental-dir={inc_dir}")
 
     logger.info(f"Preparing backup in {target_dir}")
+    print(f"Executing command: {' '.join(command)}")
     try:
         subprocess.run(command, check=True, capture_output=True)
         logger.info(f"Backup in {target_dir} prepared successfully.")
@@ -151,6 +224,67 @@ def restore_backup(backup_dir, config, method='copy-back'):
     Returns:
         bool: True on success, False on failure.
     """
+    # Clean data directory before restore
+    logger.info("In mariadb.restore_backup")
+    datadir = config.get('MARIADB_DATADIR')
+    if not datadir:
+        logger.error("MARIADB_DATADIR not specified in config")
+        return False
+        
+    # Get required directories from config
+    innodb_data_dir = config.get('INNODB_DATA_HOME_DIR', datadir)  # Default to datadir if not specified
+    innodb_log_dir = config.get('INNODB_LOG_GROUP_HOME_DIR', innodb_data_dir)
+    logger.info("Got datadir %s %s %s", datadir, innodb_data_dir, innodb_log_dir)
+
+    try:
+        # Clean up all directories
+        dirs_to_clean = [
+            datadir,
+            innodb_data_dir,
+            innodb_log_dir
+        ]
+        
+        # Remove all contents from directories
+        for dir_path in dirs_to_clean:
+            if os.path.exists(dir_path):
+                logger.info(f"Cleaning directory: {dir_path}")
+                try:
+                    # Remove directory and recreate it
+                    shutil.rmtree(dir_path)
+                    os.makedirs(dir_path)
+                except Exception as e:
+                    logger.error(f"Failed to clean directory {dir_path}: {e}")
+                    return False
+                
+    #     # Ensure all required directories exist with proper permissions
+    #     dirs_to_create = dirs_to_clean
+        
+    #     # Create directories and set permissions
+    #     for dir_path in dirs_to_create:
+    #         try:
+    #             # Create directory if it doesn't exist
+    #             os.makedirs(dir_path, exist_ok=True)
+                
+    #             # Set directory permissions (750)
+    #             os.chmod(dir_path, 0o750)
+                
+    #             # Set ownership to mysql:mysql
+    #             shutil.chown(dir_path, 'mysql', 'mysql')
+                
+    #             logger.info(f"Directory prepared: {dir_path}")
+    #         except Exception as e:
+    #             logger.error(f"Failed to prepare directory {dir_path}: {e}")
+    #             return False
+                
+    #     # Log directory structure for debugging
+    #     logger.info("Directory structure prepared for restore:")
+    #     logger.info(f"Data directory: {datadir}")
+    #     logger.info(f"InnoDB data directory: {innodb_data_dir}")
+    #     logger.info(f"InnoDB log directory: {innodb_log_dir}")
+            
+    except Exception as e:
+        logger.error(f"Failed to prepare directories for restore: {e}")
+        return False
     mariadb_backup_path = config.get('MARIADB_BACKUP_PATH')
     # Build base command
     command = [
@@ -163,15 +297,26 @@ def restore_backup(backup_dir, config, method='copy-back'):
     else:
         logger.error(f"Invalid restore method: {method}")
         return False
-    command.append(f"--target-dir={backup_dir}")
+        
+    # Add required parameters
+    # Get the latest backup directory
     
-    # Add datadir if specified
-    if config.get('MYSQL_DATADIR'):
-        command.append(f"--datadir={config['MYSQL_DATADIR']}")
+    logger.info(f"Using extracted backup directory: {backup_dir}")
+    command.extend([
+        f"--target-dir={backup_dir}",
+        f"--datadir={datadir}"
+    ])
+    
+    # Add InnoDB directory parameters if they differ from datadir
+    if innodb_data_dir != datadir:
+        command.append(f"--innodb-data-home-dir={innodb_data_dir}")
+    if innodb_log_dir != datadir:
+        command.append(f"--innodb-log-group-home-dir={innodb_log_dir}")
     logger.info(f"Restoring backup from {backup_dir} using {method}")
+    print(f"Executing command: {' '.join(command)}")
     try:
-        subprocess.run(command, check=True, capture_output=True)
-        logger.info(f"Backup from {backup_dir} restored successfully.")
+        # Restore the backup
+        subprocess.run(command, check=True, capture_output=False)
         return True
     except subprocess.CalledProcessError as e:
         logger.error(f"Restoring backup from {backup_dir} failed: {e}")

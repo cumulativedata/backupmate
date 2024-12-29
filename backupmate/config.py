@@ -12,8 +12,9 @@ def load_config(env_path=".backupmate.env"):
             "AWS_REGION", "LOCAL_TEMP_DIR",
             "FULL_BACKUP_PREFIX", "INCREMENTAL_BACKUP_PREFIX",
             "FULL_BACKUP_SCHEDULE",
-            "MYSQL_SOCKET", "MYSQL_DATADIR"  # Optional parameters
+            "MARIADB_DATADIR", "IS_INTEGRATION_TEST"  # Optional parameters
         ]}
+    assert 'integration_overrides' in globals()
 
     # Load with override to ensure we get values from the specified file
     load_dotenv(dotenv_path=env_path, override=True)
@@ -31,9 +32,12 @@ def load_config(env_path=".backupmate.env"):
         "FULL_BACKUP_PREFIX": os.getenv("FULL_BACKUP_PREFIX"),
         "INCREMENTAL_BACKUP_PREFIX": os.getenv("INCREMENTAL_BACKUP_PREFIX"),
         "FULL_BACKUP_SCHEDULE": os.getenv("FULL_BACKUP_SCHEDULE"),
-        "MYSQL_SOCKET": os.getenv("MYSQL_SOCKET"),  # Optional socket file path
-        "MYSQL_DATADIR": os.getenv("MYSQL_DATADIR"),  # Optional data directory path
+        "MARIADB_SOCKET": os.getenv("MARIADB_SOCKET"),  # Socket file path (required)
+        "MARIADB_DATADIR": os.getenv("MARIADB_DATADIR"),  # Optional data directory path
+        "IS_INTEGRATION_TEST": os.getenv("IS_INTEGRATION_TEST", "false").lower() == "true",  # Integration test flag
     }
+    if 'integration_overrides' in globals():
+        config.update(integration_overrides)
     return config
 
 def validate_config(config):
@@ -52,9 +56,10 @@ def validate_config(config):
         "FULL_BACKUP_PREFIX",
         "INCREMENTAL_BACKUP_PREFIX",
         "FULL_BACKUP_SCHEDULE",
+        "MARIADB_SOCKET",
     ]
     for param in required_params:
-        if not config.get(param) or config[param].strip() == "":
+        if param != 'DB_PASSWORD' and (not config.get(param) or config[param].strip() == ""):
             raise ValueError(f"Missing required configuration parameter: {param}")
 
     # Validate DB_PORT is an integer
@@ -80,10 +85,10 @@ def validate_config(config):
     if not os.path.isabs(config["LOCAL_TEMP_DIR"]):
         raise ValueError("LOCAL_TEMP_DIR must be an absolute path")
     
-    # Validate optional paths if provided
-    if config.get("MYSQL_SOCKET") and not os.path.isabs(config["MYSQL_SOCKET"]):
-        raise ValueError("MYSQL_SOCKET must be an absolute path")
-    if config.get("MYSQL_DATADIR") and not os.path.isabs(config["MYSQL_DATADIR"]):
-        raise ValueError("MYSQL_DATADIR must be an absolute path")
+    # Validate socket path
+    if not os.path.isabs(config["MARIADB_SOCKET"]):
+        raise ValueError("MARIADB_SOCKET must be an absolute path")
+    if config.get("MARIADB_DATADIR") and not os.path.isabs(config["MARIADB_DATADIR"]):
+        raise ValueError("MARIADB_DATADIR must be an absolute path")
 
     return True
