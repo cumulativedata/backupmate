@@ -10,7 +10,11 @@ class TestRestore(unittest.TestCase):
         self.config = {
             'S3_BUCKET_NAME': 'test-bucket',
             'LOCAL_TEMP_DIR': '/tmp/test_restore',
-            'MARIADB_BACKUP_PATH': '/usr/bin/mariabackup'
+            'MARIADB_BACKUP_PATH': '/usr/bin/mariabackup',
+            'MARIADB_DATADIR': '/var/lib/mysql',
+            'INNODB_DATA_HOME_DIR': '/var/lib/mysql/innodb',
+            'INNODB_LOG_GROUP_HOME_DIR': '/var/lib/mysql/innodb',
+            'IS_TEST': True
         }
         self.backup_prefix = 'backups/2023/01/01/'
 

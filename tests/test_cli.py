@@ -88,7 +88,7 @@ class TestCLI(unittest.TestCase):
         sys.stdout = stdout
 
         try:
-            with patch('backupmate.cli.list_objects') as mock_list:
+            with patch('backupmate.s3.list_objects') as mock_list:
                 mock_list.return_value = ['backup1', 'backup2']
                 result = main()
                 self.assertEqual(result, 0)
@@ -118,14 +118,16 @@ class TestCLI(unittest.TestCase):
             self.assertTrue(result)
             mock_backup.assert_called_once_with(self.config)
 
-    def test_handle_backup_incremental(self):
+    @patch('backupmate.s3.get_latest_backup_prefix')
+    def test_handle_backup_incremental(self, mock_get_latest):
         args = argparse.Namespace(full=False)
+        mock_get_latest.return_value = 'backups/full/latest'
         
         with patch('backupmate.cli.perform_incremental_backup') as mock_backup:
             mock_backup.return_value = True
             result = handle_backup(args, self.config, self.logger)
             self.assertTrue(result)
-            mock_backup.assert_called_once_with(self.config)
+            mock_backup.assert_called_once_with(self.config, 'backups/full/latest')
 
     def test_handle_restore_validation(self):
         # Test multiple restore options specified
@@ -170,7 +172,7 @@ class TestCLI(unittest.TestCase):
                 config=self.config
             )
 
-    @patch('backupmate.cli.list_objects')
+    @patch('backupmate.s3.list_objects')
     def test_handle_restore_success_with_latest_full(self, mock_list_objects):
         """Test restore with --latest-full flag"""
         args = argparse.Namespace(
@@ -198,7 +200,7 @@ class TestCLI(unittest.TestCase):
                 self.config
             )
 
-    @patch('backupmate.cli.list_objects')
+    @patch('backupmate.s3.list_objects')
     def test_handle_restore_success_with_latest_incremental(self, mock_list_objects):
         """Test restore with --latest-incremental flag"""
         args = argparse.Namespace(
@@ -226,7 +228,7 @@ class TestCLI(unittest.TestCase):
                 self.config
             )
 
-    @patch('backupmate.cli.list_objects')
+    @patch('backupmate.s3.list_objects')
     def test_handle_restore_no_backups_found(self, mock_list_objects):
         """Test restore when no backups are found"""
         args = argparse.Namespace(
@@ -247,7 +249,7 @@ class TestCLI(unittest.TestCase):
     def test_handle_list(self):
         args = argparse.Namespace(json=False)
         
-        with patch('backupmate.cli.list_objects') as mock_list:
+        with patch('backupmate.s3.list_objects') as mock_list:
             mock_list.return_value = ['backup1', 'backup2']
             
             # Capture stdout

@@ -9,7 +9,7 @@ from backupmate.config import load_config, validate_config
 from backupmate.logger import setup_logger, log_info, log_error
 from backupmate.backup import perform_full_backup, perform_incremental_backup
 from backupmate.restore import restore_specific_backup
-from backupmate.s3 import list_objects
+from backupmate import s3
 from backupmate.utils import ensure_directory
 
 def handle_backup(args: argparse.Namespace, config: Dict[str, Any], logger: Any) -> bool:
@@ -26,7 +26,7 @@ def handle_backup(args: argparse.Namespace, config: Dict[str, Any], logger: Any)
         else:
             log_info(logger, "Starting incremental backup")
             # Get the latest full backup prefix to use as base
-            base_prefix = get_latest_full_backup_prefix(
+            base_prefix = s3.get_latest_backup_prefix(
                 config['S3_BUCKET_NAME'],
                 config['FULL_BACKUP_PREFIX'],
                 config
@@ -63,7 +63,7 @@ def handle_restore(args: argparse.Namespace, config: Dict[str, Any], logger: Any
         backup_identifier = args.backup_id
         if args.latest_full:
             # TODO: Get latest full backup identifier from S3
-            backups = list_objects(
+            backups = s3.list_objects(
                 config['S3_BUCKET_NAME'],
                 config['FULL_BACKUP_PREFIX'],
                 config
@@ -71,7 +71,7 @@ def handle_restore(args: argparse.Namespace, config: Dict[str, Any], logger: Any
             backup_identifier = backups[-1] if backups else None
         elif args.latest_incremental:
             # TODO: Get latest incremental backup identifier from S3
-            backups = list_objects(
+            backups = s3.list_objects(
                 config['S3_BUCKET_NAME'],
                 config['INCREMENTAL_BACKUP_PREFIX'],
                 config
@@ -103,14 +103,14 @@ def handle_list(args: argparse.Namespace, config: Dict[str, Any], logger: Any) -
         log_info(logger, "Listing available backups")
         
         # List full backups
-        full_backups = list_objects(
+        full_backups = s3.list_objects(
             config['S3_BUCKET_NAME'],
             config['FULL_BACKUP_PREFIX'],
             config
         )
         
         # List incremental backups
-        incremental_backups = list_objects(
+        incremental_backups = s3.list_objects(
             config['S3_BUCKET_NAME'],
             config['INCREMENTAL_BACKUP_PREFIX'],
             config

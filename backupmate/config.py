@@ -35,6 +35,7 @@ def load_config(env_path=".backupmate.env"):
         "MARIADB_SOCKET": os.getenv("MARIADB_SOCKET"),  # Socket file path (required)
         "MARIADB_DATADIR": os.getenv("MARIADB_DATADIR"),  # Optional data directory path
         "IS_INTEGRATION_TEST": os.getenv("IS_INTEGRATION_TEST", "false").lower() == "true",  # Integration test flag
+        "IS_TEST": os.getenv("IS_TEST", "false").lower() == "true",  # Unit test flag
         "MYSQL_START_COMMAND": os.getenv("MYSQL_START_COMMAND"),  # Optional command to start MySQL server
         "MYSQL_STOP_COMMAND": os.getenv("MYSQL_STOP_COMMAND"),  # Optional command to stop MySQL server
     }

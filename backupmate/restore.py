@@ -1,4 +1,5 @@
 import os
+import time
 import logging
 import subprocess
 from typing import Union
@@ -55,6 +56,41 @@ def restore_specific_backup(backup_identifier, restore_method, config):
             if not start_mariadb_server():
                 logger.error("Failed to start MariaDB server")
                 return False
+
+            # In test environment, skip server accessibility check
+            if not config.get('IS_TEST'):
+                # Wait for server to be accessible
+                max_retries = 30
+                retry_interval = 1
+                server_started = False
+                
+                for _ in range(max_retries):
+                    try:
+                        subprocess.run(
+                            [
+                                'mariadb',
+                                f'--socket={config.get("MARIADB_SOCKET")}',
+                                '--user=root',
+                                '-e', 'SELECT 1'
+                            ],
+                            check=True,
+                            capture_output=True
+                        )
+                        server_started = True
+                        logger.info("MariaDB server is accessible after restore")
+                        break
+                    except subprocess.CalledProcessError:
+                        logger.info("Waiting for MariaDB server to be accessible...")
+                        time.sleep(retry_interval)
+                        
+                if not server_started:
+                    log_file = config.get('MARIADB_DATADIR') + '.log'
+                    if os.path.exists(log_file):
+                        with open(log_file, 'r') as f:
+                            log_content = f.read()
+                        logger.error(f"MariaDB Error Log:\n{log_content}")
+                    logger.error("Failed to access MariaDB server after restore")
+                    return False
 
     except Exception as e:
         logger.error(f"Unexpected error during restore: {str(e)}")

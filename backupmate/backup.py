@@ -11,7 +11,10 @@ logger = logging.getLogger(__name__)
 
 def _init_db(config):
     """Initialize SQLite database for backup metadata."""
-    db_path = os.path.join(config.get('LOCAL_TEMP_DIR'), 'backups.db')
+    if config.get('IS_TEST'):
+        db_path = 'test.db'
+    else:
+        db_path = os.path.join(config.get('LOCAL_TEMP_DIR'), 'backups.db')
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
@@ -156,6 +159,7 @@ def perform_incremental_backup(config, base_prefix):
     s3_prefix = f"{config.get('INCREMENTAL_BACKUP_PREFIX')}"
     compressed_file = f"{temp_dir}.tar.gz"
     
+    success = False
     try:
         # Create backup directories
         os.makedirs(temp_dir, exist_ok=True)
@@ -194,6 +198,7 @@ def perform_incremental_backup(config, base_prefix):
         record_backup_metadata(config, 'incremental', s3_prefix, backup_dir)
         
         logger.info(f"Incremental backup completed successfully: {s3_prefix}")
+        success = True
         return True
         
     except Exception as e:
@@ -211,6 +216,14 @@ def perform_incremental_backup(config, base_prefix):
                 shutil.rmtree(temp_dir)
             except OSError as e:
                 logger.warning(f"Failed to remove temporary directory: {str(e)}")
+        
+        # Clean up backup directory on failure
+        if not success and os.path.exists(backup_dir):
+            try:
+                logger.debug(f"Removing backup directory: {backup_dir}")
+                shutil.rmtree(backup_dir)
+            except OSError as e:
+                logger.warning(f"Failed to remove backup directory: {str(e)}")
         
         # Clean up compressed file
         logger.debug(f"Checking compressed file existence: {compressed_file} - {os.path.exists(compressed_file)}")

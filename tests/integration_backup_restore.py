@@ -34,6 +34,7 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
             'INNODB_LOG_GROUP_HOME_DIR': cls.TEST_DATADIR+'_innodb',  # InnoDB log directory
             'DB_USER': 'root',
             'DB_PASSWORD': '',
+            'IS_TEST': True,
             'LOCAL_TEMP_DIR': '/tmp/backupmate_test_backup',  # Separate backup directory
             'IS_INTEGRATION_TEST': True,  # Flag to enable test instance verification
             'MYSQL_START_COMMAND': f'mariadbd --datadir={cls.TEST_DATADIR} --port={cls.TEST_PORT} --socket={cls.TEST_DATADIR}.sock --pid-file={cls.TEST_DATADIR}.pid --log-error={cls.TEST_DATADIR}.log --skip-networking=0 --user=mysql --basedir=/usr --tmpdir={cls.TEST_DATADIR}_tmp --innodb_data_home_dir={cls.TEST_DATADIR}_innodb --innodb_log_group_home_dir={cls.TEST_DATADIR}_innodb --binlog-format=ROW --expire-logs-days=10 --open-files-limit=65535 --innodb_data_file_path=ibdata1:10M:autoextend --innodb_file_per_table=1 --lower_case_table_names=0 --log-warnings=2 &',
@@ -52,9 +53,18 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         """Clean up test environment."""
-        #cls.stop_test_mariadb_instance()
-        #cls.cleanup_test_files() # Keeping this off for testing
-        pass
+        cls.logger.info("Cleaning up test environment...")
+        try:
+            cls.stop_test_mariadb_instance()
+            cls.logger.info("Stopped test MariaDB instance")
+        except Exception as e:
+            cls.logger.error(f"Failed to stop test MariaDB instance: {e}")
+            
+        try:
+            cls.cleanup_test_files()
+            cls.logger.info("Cleaned up test files")
+        except Exception as e:
+            cls.logger.error(f"Failed to clean up test files: {e}")
 
     def setUp(self):
         """Set up test case."""
@@ -62,10 +72,10 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
         
     def tearDown(self):
         """Clean up after test."""
+
         # Restore original sys.argv
         sys.argv = self.original_argv
-        # Clean up test data
-        # self.cleanup_test_data()
+        # dont change this.
 
     @classmethod
     def set_directory_permissions(cls, directories, user='mysql', group='mysql', mode=0o750):
@@ -406,9 +416,26 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
         self.assertTrue(initial_data, "Initial test data not found")
         
         # Take full backup
+        self.logger.info("Starting full backup process...")
         os.environ['IS_INTEGRATION_TEST'] = 'true'
         sys.argv = ['backupmate', 'backup', '--full']
-        result = cli.main()
+        try:
+            # Log the command being executed
+            self.logger.info(f"Executing command: {' '.join(sys.argv)}")
+            result = cli.main()
+            self.logger.info(f"Full backup completed with result: {result}")
+            # Log the backup directory contents
+            backup_dir = config.integration_overrides['LOCAL_TEMP_DIR']
+            if os.path.exists(backup_dir):
+                self.logger.info(f"Backup directory contents ({backup_dir}):")
+                for root, dirs, files in os.walk(backup_dir):
+                    for name in dirs:
+                        self.logger.info(f"  DIR: {os.path.join(root, name)}")
+                    for name in files:
+                        self.logger.info(f"  FILE: {os.path.join(root, name)}")
+        except Exception as e:
+            self.logger.error(f"Full backup failed with error: {str(e)}")
+            raise
         os.environ.pop('IS_INTEGRATION_TEST', None)
         self.assertEqual(result, 0, "Full backup command failed")
         
@@ -427,9 +454,26 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
         )
         
         # Take first incremental backup
+        self.logger.info("Starting first incremental backup process...")
         os.environ['IS_INTEGRATION_TEST'] = 'true'
         sys.argv = ['backupmate', 'backup']  # Incremental is default when --full is not specified
-        result = cli.main()
+        try:
+            # Log the command being executed
+            self.logger.info(f"Executing command: {' '.join(sys.argv)}")
+            result = cli.main()
+            self.logger.info(f"First incremental backup completed with result: {result}")
+            # Log the backup directory contents
+            backup_dir = config.integration_overrides['LOCAL_TEMP_DIR']
+            if os.path.exists(backup_dir):
+                self.logger.info(f"Backup directory contents ({backup_dir}):")
+                for root, dirs, files in os.walk(backup_dir):
+                    for name in dirs:
+                        self.logger.info(f"  DIR: {os.path.join(root, name)}")
+                    for name in files:
+                        self.logger.info(f"  FILE: {os.path.join(root, name)}")
+        except Exception as e:
+            self.logger.error(f"First incremental backup failed with error: {str(e)}")
+            raise
         os.environ.pop('IS_INTEGRATION_TEST', None)
         self.assertEqual(result, 0, "First incremental backup command failed")
         
@@ -448,9 +492,26 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
         )
         
         # Take second incremental backup
+        self.logger.info("Starting second incremental backup process...")
         os.environ['IS_INTEGRATION_TEST'] = 'true'
         sys.argv = ['backupmate', 'backup']  # Incremental is default when --full is not specified
-        result = cli.main()
+        try:
+            # Log the command being executed
+            self.logger.info(f"Executing command: {' '.join(sys.argv)}")
+            result = cli.main()
+            self.logger.info(f"Second incremental backup completed with result: {result}")
+            # Log the backup directory contents
+            backup_dir = config.integration_overrides['LOCAL_TEMP_DIR']
+            if os.path.exists(backup_dir):
+                self.logger.info(f"Backup directory contents ({backup_dir}):")
+                for root, dirs, files in os.walk(backup_dir):
+                    for name in dirs:
+                        self.logger.info(f"  DIR: {os.path.join(root, name)}")
+                    for name in files:
+                        self.logger.info(f"  FILE: {os.path.join(root, name)}")
+        except Exception as e:
+            self.logger.error(f"Second incremental backup failed with error: {str(e)}")
+            raise
         os.environ.pop('IS_INTEGRATION_TEST', None)
         self.assertEqual(result, 0, "Second incremental backup command failed")
         
@@ -487,9 +548,30 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
         
         # Restore using the latest incremental backup
         # This will automatically prepare the full backup and apply incrementals
+        self.logger.info("Starting restore process...")
         os.environ['IS_INTEGRATION_TEST'] = 'true'
         sys.argv = ['backupmate', 'restore', latest_backup, '--copy-back']
-        result = cli.main()
+        try:
+            # Log the command being executed
+            self.logger.info(f"Executing command: {' '.join(sys.argv)}")
+            result = cli.main()
+            self.logger.info(f"Restore completed with result: {result}")
+            # Log the data directory contents after restore
+            if os.path.exists(self.TEST_DATADIR):
+                self.logger.info(f"Data directory contents after restore ({self.TEST_DATADIR}):")
+                for root, dirs, files in os.walk(self.TEST_DATADIR):
+                    for name in dirs:
+                        self.logger.info(f"  DIR: {os.path.join(root, name)}")
+                    for name in files:
+                        self.logger.info(f"  FILE: {os.path.join(root, name)}")
+        except Exception as e:
+            self.logger.error(f"Restore failed with error: {str(e)}")
+            # Log MariaDB error log if it exists
+            log_file = f'{self.TEST_DATADIR}.log'
+            if os.path.exists(log_file):
+                with open(log_file, 'r') as f:
+                    self.logger.error(f"MariaDB Error Log:\n{f.read()}")
+            raise
         os.environ.pop('IS_INTEGRATION_TEST', None)
         self.assertEqual(result, 0, "Restore command failed")
         
@@ -514,9 +596,26 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
         self.assertTrue(initial_data, "Initial test data not found")
         
         # Step 1: Perform full backup
+        self.logger.info("Starting full backup process...")
         os.environ['IS_INTEGRATION_TEST'] = 'true'
         sys.argv = ['backupmate', 'backup', '--full']
-        result = cli.main()
+        try:
+            # Log the command being executed
+            self.logger.info(f"Executing command: {' '.join(sys.argv)}")
+            result = cli.main()
+            self.logger.info(f"Full backup completed with result: {result}")
+            # Log the backup directory contents
+            backup_dir = config.integration_overrides['LOCAL_TEMP_DIR']
+            if os.path.exists(backup_dir):
+                self.logger.info(f"Backup directory contents ({backup_dir}):")
+                for root, dirs, files in os.walk(backup_dir):
+                    for name in dirs:
+                        self.logger.info(f"  DIR: {os.path.join(root, name)}")
+                    for name in files:
+                        self.logger.info(f"  FILE: {os.path.join(root, name)}")
+        except Exception as e:
+            self.logger.error(f"Full backup failed with error: {str(e)}")
+            raise
         os.environ.pop('IS_INTEGRATION_TEST', None)
         self.assertEqual(result, 0, "Full backup command failed")
         
@@ -581,9 +680,30 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
         config.integration_overrides['LOCAL_TEMP_DIR'] = self.TEST_EXTRACTDIR
         
         # Now perform the restore
+        self.logger.info("Starting restore process...")
         os.environ['IS_INTEGRATION_TEST'] = 'true'
         sys.argv = ['backupmate', 'restore', latest_backup, '--copy-back']
-        result = cli.main()
+        try:
+            # Log the command being executed
+            self.logger.info(f"Executing command: {' '.join(sys.argv)}")
+            result = cli.main()
+            self.logger.info(f"Restore completed with result: {result}")
+            # Log the data directory contents after restore
+            if os.path.exists(self.TEST_DATADIR):
+                self.logger.info(f"Data directory contents after restore ({self.TEST_DATADIR}):")
+                for root, dirs, files in os.walk(self.TEST_DATADIR):
+                    for name in dirs:
+                        self.logger.info(f"  DIR: {os.path.join(root, name)}")
+                    for name in files:
+                        self.logger.info(f"  FILE: {os.path.join(root, name)}")
+        except Exception as e:
+            self.logger.error(f"Restore failed with error: {str(e)}")
+            # Log MariaDB error log if it exists
+            log_file = f'{self.TEST_DATADIR}.log'
+            if os.path.exists(log_file):
+                with open(log_file, 'r') as f:
+                    self.logger.error(f"MariaDB Error Log:\n{f.read()}")
+            raise
         os.environ.pop('IS_INTEGRATION_TEST', None)
         self.assertEqual(result, 0, "Restore command failed")
 

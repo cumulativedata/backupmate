@@ -59,7 +59,10 @@ class TestMariadb(unittest.TestCase):
     @patch('backupmate.mariadb.subprocess.run')
     def test_prepare_backup_success(self, mock_run):
         mock_run.return_value.check_returncode.return_value = None
-        config = {'MARIADB_BACKUP_PATH': '/usr/bin/mariabackup'}
+        config = {
+            'MARIADB_BACKUP_PATH': '/usr/bin/mariabackup',
+            'LOCAL_TEMP_DIR': '/tmp/backups'
+        }
         result = mariadb.prepare_backup('backup_dir', config=config)
         self.assertTrue(result)
         mock_run.assert_called_once_with(
@@ -71,7 +74,10 @@ class TestMariadb(unittest.TestCase):
     @patch('backupmate.mariadb.subprocess.run')
     def test_prepare_backup_with_incrementals_success(self, mock_run):
         mock_run.return_value.check_returncode.return_value = None
-        config = {'MARIADB_BACKUP_PATH': '/usr/bin/mariabackup'}
+        config = {
+            'MARIADB_BACKUP_PATH': '/usr/bin/mariabackup',
+            'LOCAL_TEMP_DIR': '/tmp/backups'
+        }
         incremental_dirs = ['inc1', 'inc2']
         result = mariadb.prepare_backup('backup_dir', incremental_dirs, config)
         self.assertTrue(result)
@@ -100,7 +106,10 @@ class TestMariadb(unittest.TestCase):
     @patch('backupmate.mariadb.subprocess.run')
     def test_prepare_backup_failure_calledprocesserror(self, mock_run):
         mock_run.side_effect = subprocess.CalledProcessError(1, 'command')
-        config = {'MARIADB_BACKUP_PATH': '/usr/bin/mariabackup'}
+        config = {
+            'MARIADB_BACKUP_PATH': '/usr/bin/mariabackup',
+            'LOCAL_TEMP_DIR': '/tmp/backups'
+        }
         result = mariadb.prepare_backup('backup_dir', config=config)
         self.assertFalse(result)
 

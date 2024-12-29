@@ -188,38 +188,116 @@ def prepare_backup(target_dir, incremental_dirs=None, config=None):
     Returns:
         bool: True on success, False on failure.
     """
+    if not config:
+        logger.error("Config is required for prepare_backup")
+        return False
+
     mariadb_backup_path = config.get('MARIADB_BACKUP_PATH')
-    
-    # First prepare the base backup
-    base_command = [
-        mariadb_backup_path,
-        "--prepare",
-        f"--target-dir={target_dir}",
-    ]
-    
-    logger.info(f"Preparing base backup in {target_dir}")
-    print(f"Executing command: {' '.join(base_command)}")
+    if not mariadb_backup_path:
+        logger.error("MARIADB_BACKUP_PATH not specified in config")
+        return False
+
     try:
-        subprocess.run(base_command, check=True, capture_output=True)
-        logger.info(f"Base backup in {target_dir} prepared successfully.")
+        # For full backups, we don't need LOCAL_TEMP_DIR
+        chain_dir = None
+        if 'inc_' in os.path.basename(target_dir):
+            local_temp_dir = config.get('LOCAL_TEMP_DIR')
+            if not local_temp_dir:
+                logger.error("LOCAL_TEMP_DIR not specified in config")
+                return False
+            chain_dir = os.path.join(local_temp_dir, 'chain')
         
-        # If we have incremental backups, apply them one at a time
-        if incremental_dirs:
-            for inc_dir in incremental_dirs:
-                inc_command = [
+        # Check if this is an incremental backup
+        is_incremental = 'inc_' in os.path.basename(target_dir)
+        
+        if is_incremental:
+            # For incremental backup, we need to:
+            # 1. Find the full backup in the chain directory
+            # 2. Prepare the full backup
+            # 3. Apply the incremental to it
+            full_backups = [d for d in os.listdir(chain_dir) if d.startswith('full_')]
+            if not full_backups:
+                logger.error("No full backup found in chain directory")
+                return False
+                
+            # Get the latest full backup
+            full_backup_dir = os.path.join(chain_dir, sorted(full_backups)[-1])
+            
+            # First prepare the base backup
+            base_command = [
+                mariadb_backup_path,
+                "--prepare",
+                f"--target-dir={full_backup_dir}",
+            ]
+            
+            logger.info(f"Preparing base backup in {full_backup_dir}")
+            print(f"Executing command: {' '.join(base_command)}")
+            subprocess.run(base_command, check=True, capture_output=True)
+            logger.info(f"Base backup in {full_backup_dir} prepared successfully.")
+            
+            # Now apply the incremental backup
+            inc_command = [
+                mariadb_backup_path,
+                "--prepare",
+                f"--target-dir={full_backup_dir}",
+                f"--incremental-dir={target_dir}"
+            ]
+            logger.info(f"Applying incremental backup from {target_dir}")
+            print(f"Executing command: {' '.join(inc_command)}")
+            subprocess.run(inc_command, check=True, capture_output=True)
+            logger.info(f"Incremental backup from {target_dir} applied successfully.")
+            
+            # Copy the prepared full backup (which now includes the incremental) to target_dir
+            if os.path.exists(target_dir):
+                shutil.rmtree(target_dir)
+            shutil.copytree(full_backup_dir, target_dir)
+            
+            return True
+        else:
+            # Handle both full and incremental backups
+            if not incremental_dirs:
+                # For full backup, just prepare it directly
+                base_command = [
                     mariadb_backup_path,
                     "--prepare",
                     f"--target-dir={target_dir}",
-                    f"--incremental-dir={inc_dir}"
                 ]
-                logger.info(f"Applying incremental backup from {inc_dir}")
-                print(f"Executing command: {' '.join(inc_command)}")
-                subprocess.run(inc_command, check=True, capture_output=True)
-                logger.info(f"Incremental backup from {inc_dir} applied successfully.")
-        
-        return True
+                
+                logger.info(f"Preparing base backup in {target_dir}")
+                print(f"Executing command: {' '.join(base_command)}")
+                subprocess.run(base_command, check=True, capture_output=True)
+                logger.info(f"Base backup in {target_dir} prepared successfully.")
+                return True
+            else:
+                # First prepare the base backup
+                base_command = [
+                    mariadb_backup_path,
+                    "--prepare",
+                    f"--target-dir={target_dir}",
+                ]
+                
+                logger.info(f"Preparing base backup in {target_dir}")
+                print(f"Executing command: {' '.join(base_command)}")
+                subprocess.run(base_command, check=True, capture_output=True)
+                logger.info(f"Base backup in {target_dir} prepared successfully.")
+                
+                # Then apply each incremental one at a time
+                for inc_dir in incremental_dirs:
+                    inc_command = [
+                        mariadb_backup_path,
+                        "--prepare",
+                        f"--target-dir={target_dir}",
+                        f"--incremental-dir={inc_dir}"
+                    ]
+                    logger.info(f"Applying incremental backup from {inc_dir}")
+                    print(f"Executing command: {' '.join(inc_command)}")
+                    subprocess.run(inc_command, check=True, capture_output=True)
+                    logger.info(f"Incremental backup from {inc_dir} applied successfully.")
+                
+                return True
+            
     except subprocess.CalledProcessError as e:
-        logger.error(f"Preparing backup in {target_dir} failed: {e}")
+        logger.error(f"Preparing backup failed: {e}")
         if e.stdout:
             logger.error(f"Stdout: {e.stdout.decode()}")
         if e.stderr:
@@ -227,6 +305,9 @@ def prepare_backup(target_dir, incremental_dirs=None, config=None):
         return False
     except FileNotFoundError:
         logger.error(f"Mariabackup executable not found at {mariadb_backup_path}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error preparing backup: {e}")
         return False
 
 def restore_backup(backup_dir, config, method='copy-back'):
