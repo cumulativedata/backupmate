@@ -20,6 +20,7 @@ def take_full_backup(target_dir, config):
     db_user = config.get('DB_USER')
     db_password = config.get('DB_PASSWORD')
 
+    # Build base command with common options
     command = [
         mariadb_backup_path,
         "--backup",
@@ -29,6 +30,10 @@ def take_full_backup(target_dir, config):
         f"--user={db_user}",
         f"--password={db_password}",
     ]
+    
+    # Add socket file if specified
+    if config.get('MYSQL_SOCKET'):
+        command.append(f"--socket={config['MYSQL_SOCKET']}")
 
     logger.info(f"Starting full backup to {target_dir}")
     try:
@@ -64,6 +69,7 @@ def take_incremental_backup(target_dir, basedir, config):
     db_user = config.get('DB_USER')
     db_password = config.get('DB_PASSWORD')
 
+    # Build base command with common options
     command = [
         mariadb_backup_path,
         "--backup",
@@ -74,6 +80,10 @@ def take_incremental_backup(target_dir, basedir, config):
         f"--user={db_user}",
         f"--password={db_password}",
     ]
+    
+    # Add socket file if specified
+    if config.get('MYSQL_SOCKET'):
+        command.append(f"--socket={config['MYSQL_SOCKET']}")
 
     logger.info(f"Starting incremental backup to {target_dir} based on {basedir}")
     try:
@@ -142,6 +152,7 @@ def restore_backup(backup_dir, config, method='copy-back'):
         bool: True on success, False on failure.
     """
     mariadb_backup_path = config.get('MARIADB_BACKUP_PATH')
+    # Build base command
     command = [
         mariadb_backup_path,
     ]
@@ -153,6 +164,10 @@ def restore_backup(backup_dir, config, method='copy-back'):
         logger.error(f"Invalid restore method: {method}")
         return False
     command.append(f"--target-dir={backup_dir}")
+    
+    # Add datadir if specified
+    if config.get('MYSQL_DATADIR'):
+        command.append(f"--datadir={config['MYSQL_DATADIR']}")
     logger.info(f"Restoring backup from {backup_dir} using {method}")
     try:
         subprocess.run(command, check=True, capture_output=True)

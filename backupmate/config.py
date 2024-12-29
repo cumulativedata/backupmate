@@ -11,7 +11,8 @@ def load_config(env_path=".backupmate.env"):
             "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
             "AWS_REGION", "LOCAL_TEMP_DIR",
             "FULL_BACKUP_PREFIX", "INCREMENTAL_BACKUP_PREFIX",
-            "FULL_BACKUP_SCHEDULE"
+            "FULL_BACKUP_SCHEDULE",
+            "MYSQL_SOCKET", "MYSQL_DATADIR"  # Optional parameters
         ]}
 
     # Load with override to ensure we get values from the specified file
@@ -30,6 +31,8 @@ def load_config(env_path=".backupmate.env"):
         "FULL_BACKUP_PREFIX": os.getenv("FULL_BACKUP_PREFIX"),
         "INCREMENTAL_BACKUP_PREFIX": os.getenv("INCREMENTAL_BACKUP_PREFIX"),
         "FULL_BACKUP_SCHEDULE": os.getenv("FULL_BACKUP_SCHEDULE"),
+        "MYSQL_SOCKET": os.getenv("MYSQL_SOCKET"),  # Optional socket file path
+        "MYSQL_DATADIR": os.getenv("MYSQL_DATADIR"),  # Optional data directory path
     }
     return config
 
@@ -76,5 +79,11 @@ def validate_config(config):
         raise ValueError("MARIADB_BACKUP_PATH must be an absolute path")
     if not os.path.isabs(config["LOCAL_TEMP_DIR"]):
         raise ValueError("LOCAL_TEMP_DIR must be an absolute path")
+    
+    # Validate optional paths if provided
+    if config.get("MYSQL_SOCKET") and not os.path.isabs(config["MYSQL_SOCKET"]):
+        raise ValueError("MYSQL_SOCKET must be an absolute path")
+    if config.get("MYSQL_DATADIR") and not os.path.isabs(config["MYSQL_DATADIR"]):
+        raise ValueError("MYSQL_DATADIR must be an absolute path")
 
     return True

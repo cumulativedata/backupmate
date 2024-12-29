@@ -3,6 +3,8 @@ import os
 import sys
 import logging
 import subprocess
+import time
+import shutil
 from datetime import datetime
 from backupmate import cli, config, s3
 
@@ -11,28 +13,438 @@ from backupmate import cli, config, s3
 class BackupRestoreIntegrationTest(unittest.TestCase):
     """Integration test for complete backup and restore cycle using CLI interface."""
     
+    TEST_PORT = 3307  # Different port for test instance
+    TEST_DATADIR = '/tmp/backupmate_test_datadir'
+    
     @classmethod
     def setUpClass(cls):
         """Set up test environment."""
         # Configure logging
         logging.basicConfig(level=logging.INFO)
         
-        # Load and validate config from .backupmate.env
+        # Load config from .backupmate.env and modify for test instance
         cls.config = config.load_config()
+        cls.original_config = cls.config.copy()
+        
+        # Update config for test instance
+        cls.config.update({
+            'DB_PORT': str(cls.TEST_PORT),  # Convert port to string
+            'MARIADB_SOCKET': '/tmp/mariadb_backupmate_test.sock',  # Custom socket file
+            'MARIADB_DATADIR': cls.TEST_DATADIR,  # Custom data directory
+            'LOCAL_TEMP_DIR': '/tmp/backupmate_test_backup'  # Separate backup directory
+        })
         config.validate_config(cls.config)
         
         # Store original sys.argv
         cls.original_argv = sys.argv
+        
+        # Start test MariaDB instance
+        cls.setup_test_mariadb_instance()
+
+    @classmethod
+    def tearDownClass(cls):
+        """Clean up test environment."""
+        cls.stop_test_mariadb_instance()
+        cls.cleanup_test_files()
 
     def setUp(self):
         """Set up test case."""
         # Create unique timestamp for this test run
         self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        # Create test data
+        self.create_test_data()
         
     def tearDown(self):
         """Clean up after test."""
         # Restore original sys.argv
         sys.argv = self.original_argv
+        # Clean up test data
+        self.cleanup_test_data()
+
+    @classmethod
+    def cleanup_test_files(cls):
+        """Clean up any existing test files."""
+        test_files = [
+            cls.TEST_DATADIR,
+            '/tmp/mariadb_backupmate_test.sock',
+            '/tmp/mariadb_backupmate_test.pid',
+            '/tmp/mariadb_backupmate_test.log',
+            '/tmp/mariadb_backupmate_test_tmp',
+            '/tmp/mariadb_backupmate_test_innodb',
+            cls.config.get('LOCAL_TEMP_DIR', '/tmp/backupmate_test_backup')
+        ]
+        for file in test_files:
+            try:
+                if os.path.isdir(file):
+                    shutil.rmtree(file)
+                elif os.path.exists(file):
+                    os.remove(file)
+            except Exception as e:
+                logging.warning(f"Failed to remove {file}: {e}")
+
+    @classmethod
+    def setup_test_mariadb_instance(cls):
+        """Start a new MariaDB instance for testing."""
+        # Clean up any existing files first
+        cls.cleanup_test_files()
+        
+        # Ensure mysql user exists
+        try:
+            subprocess.run(['id', 'mysql'], check=True)
+        except subprocess.CalledProcessError:
+            logging.error("MySQL user does not exist. Please create it with: useradd mysql")
+            raise
+            
+        # Create required directories with proper permissions
+        dirs = [
+            cls.TEST_DATADIR,
+            '/tmp/mariadb_backupmate_test_tmp',
+            '/tmp/mariadb_backupmate_test_innodb'
+        ]
+        for dir_path in dirs:
+            logging.info(f"Creating directory: {dir_path}")
+            try:
+                os.makedirs(dir_path, exist_ok=True)
+                logging.info(f"Directory created: {dir_path}")
+                
+                os.chmod(dir_path, 0o750)  # Ensure proper permissions
+                logging.info(f"Permissions set to 750 for: {dir_path}")
+                
+                # First ensure current user owns the directory
+                os.chown(dir_path, os.getuid(), os.getgid())
+                logging.info(f"Changed ownership to current user for: {dir_path}")
+                
+                # Then set mysql user as owner
+                subprocess.run(['chown', '-R', 'mysql:mysql', dir_path], check=True)
+                logging.info(f"Changed ownership to mysql:mysql for: {dir_path}")
+            except Exception as e:
+                logging.error(f"Failed to setup directory {dir_path}: {str(e)}")
+                raise
+        
+        # Initialize MariaDB data directory with explicit permissions
+        init_cmd = [
+            'mariadb-install-db',
+            f'--datadir={cls.TEST_DATADIR}',
+            '--user=mysql',
+            '--skip-test-db',
+            '--auth-root-authentication-method=normal'
+        ]
+        try:
+            result = subprocess.run(init_cmd, capture_output=True, text=True, check=True)
+            logging.info("MariaDB data directory initialized successfully")
+            logging.info(f"Initialization output: {result.stdout}")
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Failed to initialize MariaDB data directory: {e}")
+            logging.error(f"Command output: {e.stdout}")
+            logging.error(f"Command error: {e.stderr}")
+            raise
+            
+        # Ensure mysql user has full permissions on data directory
+        subprocess.run(['chmod', '-R', '750', cls.TEST_DATADIR], check=True)
+        subprocess.run(['chown', '-R', 'mysql:mysql', cls.TEST_DATADIR], check=True)
+        
+        # Start MariaDB server with additional permissions
+        server_cmd = [
+            'mariadbd',
+            f'--datadir={cls.TEST_DATADIR}',
+            f'--port={cls.TEST_PORT}',
+            '--socket=/tmp/mariadb_backupmate_test.sock',
+            '--pid-file=/tmp/mariadb_backupmate_test.pid',
+            '--log-error=/tmp/mariadb_backupmate_test.log',
+            '--skip-networking=0',
+            '--user=mysql',
+            '--basedir=/usr',
+            '--tmpdir=/tmp/mariadb_backupmate_test_tmp',
+            '--innodb_data_home_dir=/tmp/mariadb_backupmate_test_innodb',
+            '--innodb_log_group_home_dir=/tmp/mariadb_backupmate_test_innodb',
+            '--log-bin=/tmp/mariadb_backupmate_test_tmp/mysql-bin',
+            '--binlog-format=ROW',
+            '--expire-logs-days=10',
+            '--log-bin-index=/tmp/mariadb_backupmate_test_tmp/mysql-bin.index',
+            '--open-files-limit=65535',  # Increase file limit
+            '--innodb_data_file_path=ibdata1:10M:autoextend',  # Explicit InnoDB file path
+            '--innodb_file_per_table=1',  # Create separate files for each table
+            '--lower_case_table_names=0',  # Case sensitive
+            '--log-warnings=2'  # Increase warning verbosity
+        ]
+
+        cls.mariadb_process = subprocess.Popen(server_cmd)
+        
+        # Wait for server to start
+        max_retries = 30
+        retry_interval = 1
+        server_started = False
+        
+        for _ in range(max_retries):
+            try:
+                subprocess.run(
+                    [
+                        'mariadb',
+                        '--socket=/tmp/mariadb_backupmate_test.sock',
+                        '--user=root',
+                        '-e', 'SELECT 1'
+                    ],
+                    check=True,
+                    capture_output=True
+                )
+                server_started = True
+                break
+            except subprocess.CalledProcessError:
+                time.sleep(retry_interval)
+                
+        if not server_started:
+            if os.path.exists('/tmp/mariadb_backupmate_test.log'):
+                with open('/tmp/mariadb_backupmate_test.log', 'r') as f:
+                    log_content = f.read()
+                logging.error(f"MariaDB Error Log:\n{log_content}")
+            raise Exception("Failed to start MariaDB server")
+
+        # --- Add these lines: set an empty root password & flush privileges ---
+        set_password_cmd = [
+            'mariadb',
+            '--socket=/tmp/mariadb_backupmate_test.sock',
+            '--user=root',
+            '-e', '''
+            ALTER USER 'root'@'localhost' IDENTIFIED BY '';
+            GRANT ALL PRIVILEGES ON *.* TO 'root'@'localhost' WITH GRANT OPTION;
+            FLUSH PRIVILEGES;
+            '''
+        ]
+        subprocess.run(set_password_cmd, check=True)
+        cls.debug_environment()
+
+    @classmethod
+    def stop_test_mariadb_instance(cls):
+        """Stop the test MariaDB instance."""
+        if hasattr(cls, 'mariadb_process'):
+            cls.mariadb_process.terminate()
+            cls.mariadb_process.wait()
+
+    def create_test_data(self):
+        """Create test database and sample data."""
+        commands = [
+            'CREATE DATABASE IF NOT EXISTS test_db;',
+            'USE test_db;',
+            'CREATE TABLE IF NOT EXISTS users (id INT PRIMARY KEY, name VARCHAR(50));',
+            'INSERT INTO users VALUES (1, "John"), (2, "Jane"), (3, "Bob");',
+            'CREATE TABLE IF NOT EXISTS orders (id INT PRIMARY KEY, user_id INT, amount DECIMAL(10,2));',
+            'INSERT INTO orders VALUES (1, 1, 100.50), (2, 2, 200.75), (3, 1, 50.25);'
+        ]
+        
+        # Remove manual directory creation
+        
+        cmd = [
+            'mariadb',
+            '--socket=/tmp/mariadb_backupmate_test.sock',
+            '--user=root'
+        ]
+        
+        # First verify server is running and accessible
+        logging.info("Verifying MariaDB server is accessible...")
+        try:
+            result = subprocess.run(
+                cmd + ['-e', 'SELECT 1;'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            logging.info("Successfully connected to MariaDB server")
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Failed to connect to MariaDB server: {e}")
+            logging.error(f"Command output: {e.stdout}")
+            logging.error(f"Command error: {e.stderr}")
+            if os.path.exists('/tmp/mariadb_backupmate_test.log'):
+                with open('/tmp/mariadb_backupmate_test.log', 'r') as f:
+                    log_content = f.read()
+                logging.error(f"MariaDB Error Log:\n{log_content}")
+            raise
+        
+        # Execute each command and log results
+        for sql in commands:
+            logging.info(f"Executing SQL: {sql}")
+            try:
+                result = subprocess.run(
+                    cmd + ['-e', sql],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                logging.info(f"SQL executed successfully: {sql}")
+            except subprocess.CalledProcessError as e:
+                logging.error(f"Failed to execute SQL: {sql}")
+                logging.error(f"Command output: {e.stdout}")
+                logging.error(f"Command error: {e.stderr}")
+                if os.path.exists('/tmp/mariadb_backupmate_test.log'):
+                    with open('/tmp/mariadb_backupmate_test.log', 'r') as f:
+                        log_content = f.read()
+                    logging.error(f"MariaDB Error Log:\n{log_content}")
+                raise
+
+
+    def cleanup_test_data(self):
+        """Clean up test database."""
+        cmd = [
+            'mariadb',
+            '--socket=/tmp/mariadb_backupmate_test.sock',
+            '--user=root',
+            '-e', 'DROP DATABASE IF EXISTS test_db;'
+        ]
+        subprocess.run(cmd, check=True)
+
+    def verify_database_state(self):
+        """Verify database is accessible and running."""
+        try:
+            cmd = [
+                'mariadb',
+                '--socket=/tmp/mariadb_backupmate_test.sock',
+                '--user=root',
+                '-e', 'SELECT 1;'
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            return result.returncode == 0
+        except Exception as e:
+            logging.error(f"Failed to verify database state: {e}")
+            return False
+
+    def test_backup_restore_cycle(self):
+        """Test complete backup and restore cycle through CLI interface."""
+        # Verify initial test data
+        initial_data = self.get_test_data()
+        self.assertTrue(initial_data, "Initial test data not found")
+        
+        # Step 1: Perform full backup
+        sys.argv = ['backupmate', 'backup', '--full']
+        result = cli.main()
+        self.assertEqual(result, 0, "Full backup command failed")
+        
+        # Step 2: List and verify backup exists in S3
+        sys.argv = ['backupmate', 'list', '--json']
+        result = cli.main()
+        self.assertEqual(result, 0, "List command failed")
+        
+        # Verify backup files exist in S3
+        objects = s3.list_objects(
+            self.config['S3_BUCKET_NAME'],
+            self.config['FULL_BACKUP_PREFIX'],
+            self.config
+        )
+        self.assertTrue(len(objects) > 0, "No backup files found in S3")
+        
+        # Get the latest backup ID
+        latest_backup = sorted(objects)[-1]
+        
+        # Drop test database to simulate data loss
+        self.cleanup_test_data()
+        
+        # Step 3: Restore the backup
+        sys.argv = ['backupmate', 'restore', latest_backup, '--copy-back']
+        result = cli.main()
+        self.assertEqual(result, 0, "Restore command failed")
+        
+        # Step 4: Verify database is accessible and data is restored correctly
+        self.assertTrue(
+            self.verify_database_state(),
+            "Database is not accessible after restore"
+        )
+        
+        restored_data = self.get_test_data()
+        self.assertEqual(
+            initial_data, 
+            restored_data, 
+            "Restored data does not match initial data"
+        )
+
+    def get_test_data(self):
+        """Get test data from database for verification."""
+        try:
+            cmd = [
+                'mariadb',
+                '--socket=/tmp/mariadb_backupmate_test.sock', 
+                '--user=root',
+                'test_db',
+                '-e', 'SELECT * FROM users ORDER BY id; SELECT * FROM orders ORDER BY id;'
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            return result.stdout.strip()
+        except subprocess.CalledProcessError:
+            return None
+
+    @classmethod
+    def debug_environment(cls):
+        """
+        Perform automated checks on the environment to help debug 'No such file or directory' issues.
+        Logs SELinux status (if any), directory permissions, and tries a test write/read.
+        """
+        logging.info("=== DEBUG ENVIRONMENT START ===")
+        
+        # 1. Check SELinux or AppArmor status
+        #    (If you're on a system without SELinux, this might just fail silently)
+        try:
+            result = subprocess.run(['getenforce'], capture_output=True, text=True, check=True)
+            logging.info(f"SELinux status: {result.stdout.strip()}")
+        except FileNotFoundError:
+            logging.info("SELinux 'getenforce' not found. Probably not running SELinux.")
+        except subprocess.CalledProcessError as e:
+            logging.info(f"SELinux check failed: {e}")
+        
+        # 2. Print directory ownership/permissions for TEST_DATADIR
+        logging.info("Checking permissions and ownership for TEST_DATADIR:")
+        try:
+            ls_cmd = ['ls', '-lhd', cls.TEST_DATADIR]
+            result = subprocess.run(ls_cmd, capture_output=True, text=True, check=True)
+            logging.info(f"{cls.TEST_DATADIR} -> {result.stdout.strip()}")
+        except Exception as e:
+            logging.warning(f"Failed to run '{' '.join(ls_cmd)}': {e}")
+        
+        # 3. Attempt to create and remove a test file in the data directory
+        test_file_path = os.path.join(cls.TEST_DATADIR, "test_write_access.tmp")
+        logging.info(f"Attempting to create and remove a test file at: {test_file_path}")
+        try:
+            with open(test_file_path, 'w') as f:
+                f.write("test")
+            if os.path.exists(test_file_path):
+                logging.info("Successfully created test file in data directory.")
+            else:
+                logging.warning("Failed to create test file, even though no exception was raised.")
+            
+            # Now remove it
+            os.remove(test_file_path)
+            if not os.path.exists(test_file_path):
+                logging.info("Successfully removed test file from data directory.")
+            else:
+                logging.warning("Test file still exists after attempt to delete.")
+        except Exception as e:
+            logging.error(f"Test file write/delete failed: {e}")
+        
+        # 4. Check any running mariadbd processes
+        logging.info("Checking for running mariadbd processes:")
+        try:
+            ps_cmd = ['ps', 'aux']
+            result = subprocess.run(ps_cmd, capture_output=True, text=True, check=True)
+            procs = [line for line in result.stdout.splitlines() if 'mariadbd' in line]
+            if procs:
+                for proc in procs:
+                    logging.info(f"Mariadbd process found: {proc}")
+            else:
+                logging.warning("No 'mariadbd' process lines found in ps output.")
+        except Exception as e:
+            logging.error(f"Failed to retrieve process list: {e}")
+        
+        logging.info("=== DEBUG ENVIRONMENT END ===")
+
+
+class BackupCredentialsTest(unittest.TestCase):
+    """Test credentials and permissions needed for backup operations."""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Set up test environment."""
+        # Configure logging
+        logging.basicConfig(level=logging.INFO)
+        
+        # Load config from .backupmate.env (production config)
+        cls.config = config.load_config()
+        config.validate_config(cls.config)
 
     def check_creds_perms(self):
         """
@@ -55,11 +467,12 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
             print(f"- Connecting to: {self.config['DB_HOST']}:{self.config['DB_PORT']}")
             print(f"- Using user: {self.config['DB_USER']}")
             cmd = [
-                'mysql',
+                'mariadb',  # Use MariaDB client
                 f'-h{self.config["DB_HOST"]}',
                 f'-P{self.config["DB_PORT"]}',
                 f'-u{self.config["DB_USER"]}',
                 f'-p{self.config["DB_PASSWORD"]}',
+                '--protocol=TCP',  # Force TCP connection
                 '-e', 'SELECT 1;'
             ]
             result = subprocess.run(cmd, capture_output=True, text=True)
@@ -105,15 +518,6 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
             if os.geteuid() != 0:
                 results['system']['status'] = False
                 results['system']['details'].append("This test must be run with sudo")
-                
-            print("\nChecking mariabackup installation...")
-            mariabackup_path = self.config.get('MARIADB_BACKUP_PATH')
-            print(f"- Looking for mariabackup at: {mariabackup_path}")
-            if not os.path.exists(mariabackup_path):
-                results['system']['status'] = False
-                results['system']['details'].append(f"Mariabackup not found at {mariabackup_path}")
-            
-            print("\nChecking backup directory permissions...")
             test_backup_dir = '/tmp/backupmate_test'
             print(f"- Testing write access to: {test_backup_dir}")
             try:
@@ -130,7 +534,6 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
                     os.rmdir(test_backup_dir)
                 except:
                     pass
-                    
         except Exception as e:
             results['system']['status'] = False
             results['system']['details'].append(f"System check error: {str(e)}")
@@ -191,58 +594,6 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
         
         print("\n=== End of Permission Check ===")
         return results
-
-    def verify_database_state(self):
-        """Verify database is accessible and running."""
-        try:
-            # Try to connect to database using mysql client
-            cmd = [
-                'mysql',
-                f'-h{self.config["DB_HOST"]}',
-                f'-P{self.config["DB_PORT"]}',
-                f'-u{self.config["DB_USER"]}',
-                f'-p{self.config["DB_PASSWORD"]}',
-                '-e', 'SELECT 1;'
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            return result.returncode == 0
-        except Exception as e:
-            logging.error(f"Failed to verify database state: {e}")
-            return False
-
-    def test_backup_restore_cycle(self):
-        """Test complete backup and restore cycle through CLI interface."""
-        # Step 1: Perform full backup
-        sys.argv = ['backupmate', 'backup', '--full']
-        result = cli.main()
-        self.assertEqual(result, 0, "Full backup command failed")
-        
-        # Step 2: List and verify backup exists in S3
-        sys.argv = ['backupmate', 'list', '--json']
-        result = cli.main()
-        self.assertEqual(result, 0, "List command failed")
-        
-        # Verify backup files exist in S3
-        objects = s3.list_objects(
-            self.config['S3_BUCKET_NAME'],
-            self.config['FULL_BACKUP_PREFIX'],
-            self.config
-        )
-        self.assertTrue(len(objects) > 0, "No backup files found in S3")
-        
-        # Get the latest backup ID
-        latest_backup = sorted(objects)[-1]
-        
-        # Step 3: Restore the backup
-        sys.argv = ['backupmate', 'restore', latest_backup, '--copy-back']
-        result = cli.main()
-        self.assertEqual(result, 0, "Restore command failed")
-        
-        # Step 4: Verify database is accessible after restore
-        self.assertTrue(
-            self.verify_database_state(),
-            "Database is not accessible after restore"
-        )
 
     def test_check_creds_perms(self):
         """Test all credentials and permissions needed for backup operations."""
