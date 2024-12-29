@@ -222,16 +222,15 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
 
     def create_test_data(self):
         """Create test database and sample data."""
-        commands = [
-            'CREATE DATABASE IF NOT EXISTS test_db;',
-            'USE test_db;',
-            'CREATE TABLE IF NOT EXISTS users (id INT PRIMARY KEY, name VARCHAR(50));',
-            'INSERT INTO users VALUES (1, "John"), (2, "Jane"), (3, "Bob");',
-            'CREATE TABLE IF NOT EXISTS orders (id INT PRIMARY KEY, user_id INT, amount DECIMAL(10,2));',
-            'INSERT INTO orders VALUES (1, 1, 100.50), (2, 2, 200.75), (3, 1, 50.25);'
-        ]
-        
-        # Remove manual directory creation
+        # Combine all SQL commands into a single execution
+        sql_script = """
+            CREATE DATABASE IF NOT EXISTS test_db;
+            USE test_db;
+            CREATE TABLE IF NOT EXISTS users (id INT PRIMARY KEY, name VARCHAR(50));
+            INSERT INTO users VALUES (1, "John"), (2, "Jane"), (3, "Bob");
+            CREATE TABLE IF NOT EXISTS orders (id INT PRIMARY KEY, user_id INT, amount DECIMAL(10,2));
+            INSERT INTO orders VALUES (1, 1, 100.50), (2, 2, 200.75), (3, 1, 50.25);
+        """
         
         cmd = [
             'mariadb',
@@ -239,18 +238,18 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
             '--user=root'
         ]
         
-        # First verify server is running and accessible
-        logging.info("Verifying MariaDB server is accessible...")
+        # Execute all commands in a single transaction
+        logging.info("Executing SQL script...")
         try:
             result = subprocess.run(
-                cmd + ['-e', 'SELECT 1;'],
+                cmd + ['-e', sql_script],
                 capture_output=True,
                 text=True,
                 check=True
             )
-            logging.info("Successfully connected to MariaDB server")
+            logging.info("SQL script executed successfully")
         except subprocess.CalledProcessError as e:
-            logging.error(f"Failed to connect to MariaDB server: {e}")
+            logging.error("Failed to execute SQL script")
             logging.error(f"Command output: {e.stdout}")
             logging.error(f"Command error: {e.stderr}")
             if os.path.exists('/tmp/mariadb_backupmate_test.log'):
@@ -258,27 +257,6 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
                     log_content = f.read()
                 logging.error(f"MariaDB Error Log:\n{log_content}")
             raise
-        
-        # Execute each command and log results
-        for sql in commands:
-            logging.info(f"Executing SQL: {sql}")
-            try:
-                result = subprocess.run(
-                    cmd + ['-e', sql],
-                    capture_output=True,
-                    text=True,
-                    check=True
-                )
-                logging.info(f"SQL executed successfully: {sql}")
-            except subprocess.CalledProcessError as e:
-                logging.error(f"Failed to execute SQL: {sql}")
-                logging.error(f"Command output: {e.stdout}")
-                logging.error(f"Command error: {e.stderr}")
-                if os.path.exists('/tmp/mariadb_backupmate_test.log'):
-                    with open('/tmp/mariadb_backupmate_test.log', 'r') as f:
-                        log_content = f.read()
-                    logging.error(f"MariaDB Error Log:\n{log_content}")
-                raise
 
 
     def cleanup_test_data(self):
