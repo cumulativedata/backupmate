@@ -54,6 +54,9 @@ FULL_BACKUP_SCHEDULE=weekly         # Schedule for full backups ('weekly' or 'mo
 MARIADB_DATADIR=/var/lib/mysql     # Custom data directory path
 MYSQL_START_COMMAND=systemctl start mariadb  # Custom command to start MariaDB
 MYSQL_STOP_COMMAND=systemctl stop mariadb   # Custom command to stop MariaDB
+
+# Metadata Storage
+SQLITE_FILE=backupmate.db                # SQLite database file path (absolute or relative to working directory)
 ```
 
 ### Configuration Validation Rules

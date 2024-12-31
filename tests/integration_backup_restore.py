@@ -37,6 +37,7 @@ class BackupRestoreIntegrationTest(unittest.TestCase):
             'IS_TEST': True,
             'LOCAL_TEMP_DIR': '/tmp/backupmate_test_backup',  # Separate backup directory
             'IS_INTEGRATION_TEST': True,  # Flag to enable test instance verification
+            'SQLITE_FILE': '/tmp/backupmate_test_backup/backupmate.db',  # SQLite file in test backup directory
             'MYSQL_START_COMMAND': f'mariadbd --datadir={cls.TEST_DATADIR} --port={cls.TEST_PORT} --socket={cls.TEST_DATADIR}.sock --pid-file={cls.TEST_DATADIR}.pid --log-error={cls.TEST_DATADIR}.log --skip-networking=0 --user=mysql --basedir=/usr --tmpdir={cls.TEST_DATADIR}_tmp --innodb_data_home_dir={cls.TEST_DATADIR}_innodb --innodb_log_group_home_dir={cls.TEST_DATADIR}_innodb --binlog-format=ROW --expire-logs-days=10 --open-files-limit=65535 --innodb_data_file_path=ibdata1:10M:autoextend --innodb_file_per_table=1 --lower_case_table_names=0 --log-warnings=2 &',
             'MYSQL_STOP_COMMAND': f'kill -9 $(cat {cls.TEST_DATADIR}.pid)'
         }

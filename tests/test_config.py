@@ -20,6 +20,7 @@ class TestConfig(unittest.TestCase):
             f.write("FULL_BACKUP_PREFIX=backupmate/full/\n")
             f.write("INCREMENTAL_BACKUP_PREFIX=backupmate/incremental/\n")
             f.write("FULL_BACKUP_SCHEDULE=weekly\n")
+            f.write("SQLITE_FILE=backupmate.db\n")
 
         loaded_config = config.load_config()
         self.assertEqual(loaded_config["DB_HOST"], "localhost")
@@ -55,6 +56,7 @@ class TestConfig(unittest.TestCase):
             "FULL_BACKUP_PREFIX": "backupmate/full/",
             "INCREMENTAL_BACKUP_PREFIX": "backupmate/incremental/",
             "FULL_BACKUP_SCHEDULE": "weekly",
+            "SQLITE_FILE": "/var/lib/backupmate/backupmate.db",
         }
         self.assertTrue(config.validate_config(valid_config))
 
@@ -152,6 +154,18 @@ class TestConfig(unittest.TestCase):
         with self.assertRaises(ValueError) as context:
             config.validate_config(invalid_prefix_config)
         self.assertIn("S3 prefix paths must end with '/'", str(context.exception))
+
+    def test_sqlite_file_default(self):
+        """Tests if SQLITE_FILE has correct default value."""
+        # Create minimal config without SQLITE_FILE
+        with open(".backupmate.env", "w") as f:
+            f.write("DB_HOST=localhost\n")
+            
+        try:
+            loaded_config = config.load_config()
+            self.assertEqual(loaded_config["SQLITE_FILE"], "backupmate.db")
+        finally:
+            os.remove(".backupmate.env")
 
     def test_validate_config_local_paths(self):
         """Tests validation of local directory paths."""

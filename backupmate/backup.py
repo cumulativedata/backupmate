@@ -11,10 +11,12 @@ logger = logging.getLogger(__name__)
 
 def _init_db(config):
     """Initialize SQLite database for backup metadata."""
+    # For tests, use test.db in current directory
     if config.get('IS_TEST'):
         db_path = 'test.db'
     else:
-        db_path = os.path.join(config.get('LOCAL_TEMP_DIR'), 'backups.db')
+        # Use configured SQLITE_FILE path (absolute or relative to working directory)
+        db_path = config.get('SQLITE_FILE', 'backupmate.db')
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     

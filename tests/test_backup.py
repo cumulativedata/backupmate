@@ -11,16 +11,6 @@ logging.basicConfig(level=logging.DEBUG)
 class TestBackup(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
-        # Delete test.db if it exists
-        if os.path.exists('test.db'):
-            try:
-                os.remove('test.db')
-            except PermissionError:
-                # If file is locked, wait a bit and try again
-                import time
-                time.sleep(0.1)
-                os.remove('test.db')
-        
         self.config = {
             'LOCAL_TEMP_DIR': 'C:\\temp\\backups',
             'CHAIN_DIR': 'C:\\temp\\backups\\chain',
@@ -32,7 +22,8 @@ class TestBackup(unittest.TestCase):
             'DB_PORT': '3306',
             'DB_USER': 'root',
             'DB_PASSWORD': 'password',
-            'IS_TEST': True
+            'IS_TEST': True,
+            'SQLITE_FILE': 'test.db'  # Explicitly set for tests
         }
         
         # Initialize test database
@@ -42,9 +33,9 @@ class TestBackup(unittest.TestCase):
         """Clean up test fixtures."""
         if hasattr(self, 'conn'):
             self.conn.close()
-        if os.path.exists('test.db'):
+        if os.path.exists(self.config['SQLITE_FILE']):
             try:
-                os.remove('test.db')
+                os.remove(self.config['SQLITE_FILE'])
             except PermissionError:
                 pass
         

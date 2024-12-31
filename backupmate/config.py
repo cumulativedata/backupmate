@@ -12,7 +12,7 @@ def load_config(env_path=".backupmate.env"):
             "AWS_REGION", "LOCAL_TEMP_DIR",
             "FULL_BACKUP_PREFIX", "INCREMENTAL_BACKUP_PREFIX",
             "FULL_BACKUP_SCHEDULE",
-            "MARIADB_DATADIR", "IS_INTEGRATION_TEST"  # Optional parameters
+            "MARIADB_DATADIR", "IS_INTEGRATION_TEST", "SQLITE_FILE"  # Optional parameters
         ]}
     #assert 'integration_overrides' in globals()
 
@@ -38,6 +38,7 @@ def load_config(env_path=".backupmate.env"):
         "IS_TEST": os.getenv("IS_TEST", "false").lower() == "true",  # Unit test flag
         "MYSQL_START_COMMAND": os.getenv("MYSQL_START_COMMAND"),  # Optional command to start MySQL server
         "MYSQL_STOP_COMMAND": os.getenv("MYSQL_STOP_COMMAND"),  # Optional command to stop MySQL server
+        "SQLITE_FILE": os.getenv("SQLITE_FILE", "backupmate.db"),  # SQLite database file path, defaults to backupmate.db
     }
     if 'integration_overrides' in globals():
         config.update(integration_overrides)
@@ -92,5 +93,10 @@ def validate_config(config):
         raise ValueError("MARIADB_SOCKET must be an absolute path")
     if config.get("MARIADB_DATADIR") and not os.path.isabs(config["MARIADB_DATADIR"]):
         raise ValueError("MARIADB_DATADIR must be an absolute path")
+
+    # Validate SQLITE_FILE path if provided
+    if config.get("SQLITE_FILE") and os.path.isabs(config["SQLITE_FILE"]):
+        if not os.path.isabs(os.path.dirname(config["SQLITE_FILE"])):
+            raise ValueError("SQLITE_FILE directory must be an absolute path")
 
     return True
